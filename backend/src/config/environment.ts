@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 const DEFAULT_PORT = 3000;
+const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
 
 function readPort(value: string | undefined): number {
   if (value === undefined) {
@@ -16,7 +17,22 @@ function readPort(value: string | undefined): number {
   return port;
 }
 
+function readRequiredEnvironmentValue(name: string): string {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
 export const config = Object.freeze({
+  frontendOrigin: process.env.FRONTEND_ORIGIN?.trim() || DEFAULT_FRONTEND_ORIGIN,
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: readPort(process.env.PORT),
+  supabaseServiceRoleKey: readRequiredEnvironmentValue(
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ),
+  supabaseUrl: readRequiredEnvironmentValue("SUPABASE_URL"),
 });
