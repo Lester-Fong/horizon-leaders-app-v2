@@ -14,6 +14,8 @@
 # Logs
 *.log
 npm-debug.log*
+package-lock.json
+package.json
 
 # Local editor and operating-system files
 .DS_Store
@@ -21,4 +23,8 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Local planning / Codex instructions
+docs/
+AGENTS.md
 
