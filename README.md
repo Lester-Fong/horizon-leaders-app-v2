@@ -2,7 +2,7 @@
 
 Horizon Church V2 is a new church leadership application for managing people, ministries, Life Groups, gatherings, events, attendance, visitors, follow-up, Harvest, and OpenCell. This repository starts fresh and does not reuse the architecture of the previous Laravel/Vue application.
 
-Phase 0 established runnable application skeletons and the V2 product source of truth. Phase 1A added a reproducible local Supabase workflow and the first approved schema slice, `public.profiles`. Phase 2 added controlled email/password login, session restoration, an Express authentication boundary, `/api/me`, inactive-account enforcement, and reusable Admin/Leader role middleware. Phase 3 adds the authenticated responsive application shell, role-aware navigation, placeholder route contracts, and shared accessible UI patterns. Hosted Supabase, domain features, and deployment remain intentionally unconfigured.
+Phase 0 established runnable application skeletons and the V2 product source of truth. Phase 1A added a reproducible local Supabase workflow and `public.profiles`. Phase 2 added controlled authentication and reusable Admin/Leader authorization. Phase 3 added the responsive application shell. Phase 4 adds the first domain slice: `public.life_groups`, authenticated reads, Admin management, Leader assignment safeguards, and a responsive Admin/Leader screen. Members, Ministries, Gatherings, hosted Supabase, and deployment remain intentionally unconfigured.
 
 ## Stack
 
@@ -48,7 +48,7 @@ The local project is not linked to a hosted Supabase project. Public signup is d
 
 Copy `frontend/.env.example` to `frontend/.env.local` and use only the local browser-safe Supabase publishable (or legacy anon) key reported by `supabase status`. Never put a service-role or secret key in a `VITE_` variable.
 
-Authenticated Admins and Leaders share the responsive Horizon shell. Dashboard and the planned domain routes are intentionally empty placeholders until their owning feature phases; the Users route is visible and accessible only to Admins in the frontend, while all sensitive authorization remains a backend responsibility.
+Authenticated Admins and Leaders share the responsive Horizon shell. Life Groups is implemented at `/life-groups`: Admins can create, edit, archive/reactivate, and reassign groups, while Leaders have a read-only active-group view. The other planned domain routes remain intentional placeholders. Users remains visible and accessible only to Admins in the frontend, while all sensitive authorization remains a backend responsibility.
 
 ```bash
 cd frontend
@@ -74,7 +74,9 @@ npm start
 
 The API health check is available at `GET /api/health`. `GET /api/me` requires `Authorization: Bearer <access-token>` and returns only the trusted active Horizon actor loaded from `public.profiles`.
 
-The integration test creates and deletes a random controlled local user through the supported Supabase admin API. It runs only when `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_PUBLISHABLE_KEY` (or `SUPABASE_ANON_KEY`) are present in the test process:
+Life Group endpoints are authenticated. `GET /api/life-groups` and `GET /api/life-groups/:id` serve approved role-aware reads. Admin-only operations are `GET /api/life-groups/leaders`, `POST /api/life-groups`, `PATCH /api/life-groups/:id`, and `PATCH /api/life-groups/:id/status`. Normal product behavior has no Life Group DELETE endpoint.
+
+The integration tests create and delete disposable controlled local users and Life Groups through supported Supabase APIs. Authentication integration additionally requires `SUPABASE_PUBLISHABLE_KEY` (or `SUPABASE_ANON_KEY`); Life Group integration requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
 npm run test:integration
@@ -89,4 +91,4 @@ Public signup remains disabled. There is no public registration route or committ
 - [Data model](docs/DATA_MODEL.md)
 - [Development checklist](docs/DEVELOPMENT_CHECKLIST.md)
 
-Only the local Supabase foundation, `profiles` migration, authentication/RBAC foundation, and application shell are configured. Remote linking, other domain tables, Storage, Cron, and deployment begin in later explicitly approved phases.
+Only the local Supabase foundation, `profiles` and `life_groups` migrations, authentication/RBAC foundation, application shell, and Life Group foundation are configured. Remote linking, Member/Ministry/Gathering schema, other domain tables, Storage, Cron, and deployment begin in later explicitly approved phases.

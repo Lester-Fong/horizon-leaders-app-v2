@@ -2,6 +2,7 @@ import type {
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
+  TextareaHTMLAttributes,
 } from 'react'
 
 import { cn } from '../../lib/cn'
@@ -75,6 +76,23 @@ export function Select({ className, hasError, ...selectProps }: SelectProps) {
       {...selectProps}
       className={cn(
         'min-h-11 w-full rounded-lg border bg-surface px-3 py-2 text-base text-ink shadow-xs disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
+        hasError ? 'border-danger' : 'border-line-strong hover:border-muted/60',
+        className,
+      )}
+    />
+  )
+}
+
+interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  hasError?: boolean
+}
+
+export function TextArea({ className, hasError, ...textAreaProps }: TextAreaProps) {
+  return (
+    <textarea
+      {...textAreaProps}
+      className={cn(
+        'min-h-28 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-base text-ink shadow-xs placeholder:text-muted/75 disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
         hasError ? 'border-danger' : 'border-line-strong hover:border-muted/60',
         className,
       )}

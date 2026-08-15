@@ -16,6 +16,7 @@ import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
+import { LifeGroupsPage } from './pages/LifeGroupsPage'
 import { ModulePlaceholderPage } from './pages/ModulePlaceholderPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { UnauthorizedPage } from './pages/UnauthorizedPage'
@@ -57,13 +58,7 @@ function App() {
               />
               <Route
                 path="life-groups"
-                element={
-                  <ModulePlaceholderPage
-                    title="Life Groups"
-                    description="Life Group records, assignments, and Gatherings are reserved for their later feature phase."
-                    icon={Users}
-                  />
-                }
+                element={<LifeGroupsPage />}
               />
               <Route
                 path="events"
