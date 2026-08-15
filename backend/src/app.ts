@@ -7,16 +7,22 @@ import {
   type LifeGroupService,
 } from "./life-groups/types.js";
 import { MemberServiceError, type MemberService } from "./members/types.js";
+import {
+  MinistryServiceError,
+  type MinistryService,
+} from "./ministries/types.js";
 import { healthRouter } from "./routes/health.js";
 import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
 import { createMembersRouter } from "./routes/members.js";
+import { createMinistriesRouter } from "./routes/ministries.js";
 
 export interface AppDependencies {
   authService: AuthService;
   frontendOrigin?: string;
   lifeGroupService?: LifeGroupService;
   memberService?: MemberService;
+  ministryService?: MinistryService;
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
@@ -38,6 +44,17 @@ const unavailableMemberService: MemberService = {
   update: async () => unavailableMember(),
 };
 
+const unavailableMinistryService: MinistryService = {
+  archive: async () => unavailableMinistry(),
+  assignMember: async () => unavailableMinistry(),
+  create: async () => unavailableMinistry(),
+  getById: async () => unavailableMinistry(),
+  list: async () => unavailableMinistry(),
+  listMembers: async () => unavailableMinistry(),
+  removeMember: async () => unavailableMinistry(),
+  update: async () => unavailableMinistry(),
+};
+
 function unavailable(): never {
   throw new LifeGroupServiceError(
     500,
@@ -54,11 +71,20 @@ function unavailableMember(): never {
   );
 }
 
+function unavailableMinistry(): never {
+  throw new MinistryServiceError(
+    500,
+    "MINISTRY_SERVICE_UNAVAILABLE",
+    "Ministry data is temporarily unavailable.",
+  );
+}
+
 export function createApp({
   authService,
   frontendOrigin = DEFAULT_FRONTEND_ORIGIN,
   lifeGroupService = unavailableLifeGroupService,
   memberService = unavailableMemberService,
+  ministryService = unavailableMinistryService,
 }: AppDependencies) {
   const app = express();
 
@@ -68,6 +94,7 @@ export function createApp({
   app.use("/api", createMeRouter(authService));
   app.use("/api", createLifeGroupsRouter(authService, lifeGroupService));
   app.use("/api", createMembersRouter(authService, memberService));
+  app.use("/api", createMinistriesRouter(authService, ministryService));
 
   return app;
 }

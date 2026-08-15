@@ -80,6 +80,37 @@ export interface MemberListFilters {
   status?: MemberListStatus
 }
 
+export interface Ministry {
+  createdAt: string
+  description: string | null
+  id: string
+  isActive: boolean
+  name: string
+  updatedAt: string
+}
+
+export interface MinistryInput {
+  description: string | null
+  name: string
+}
+
+export interface MinistryMember {
+  email: string | null
+  firstName: string
+  id: string
+  isActive: boolean
+  lastName: string
+  lifeGroup: MemberLifeGroup
+  phone: string | null
+}
+
+export type MinistryListStatus = 'active' | 'archived' | 'all'
+
+export interface MinistryListFilters {
+  search?: string
+  status?: MinistryListStatus
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -173,6 +204,31 @@ function isMember(value: unknown): value is Member {
   )
 }
 
+function isMinistry(value: unknown): value is Ministry {
+  return (
+    isRecord(value) &&
+    typeof value.createdAt === 'string' &&
+    (typeof value.description === 'string' || value.description === null) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.name === 'string' &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+function isMinistryMember(value: unknown): value is MinistryMember {
+  return (
+    isRecord(value) &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.lastName === 'string' &&
+    isMemberLifeGroup(value.lifeGroup) &&
+    (typeof value.phone === 'string' || value.phone === null)
+  )
+}
+
 function readApiError(payload: unknown) {
   if (!isRecord(payload) || !isRecord(payload.error)) {
     return undefined
@@ -242,6 +298,12 @@ const isLeaderOptionList = (value: unknown): value is LeaderOption[] =>
 const isMemberList = (value: unknown): value is Member[] =>
   Array.isArray(value) && value.every(isMember)
 
+const isMinistryList = (value: unknown): value is Ministry[] =>
+  Array.isArray(value) && value.every(isMinistry)
+
+const isMinistryMemberList = (value: unknown): value is MinistryMember[] =>
+  Array.isArray(value) && value.every(isMinistryMember)
+
 export function getLifeGroups(accessToken: string) {
   return requestApi(accessToken, '/life-groups', isLifeGroupList)
 }
@@ -300,6 +362,79 @@ export function archiveMember(accessToken: string, memberId: string) {
   return requestApi(accessToken, `/members/${memberId}/archive`, isMember, {
     method: 'PATCH',
   })
+}
+
+export function getMinistries(
+  accessToken: string,
+  filters: MinistryListFilters = {},
+) {
+  const searchParameters = new URLSearchParams()
+  if (filters.search) searchParameters.set('search', filters.search)
+  if (filters.status) searchParameters.set('status', filters.status)
+  const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
+  return requestApi(accessToken, `/ministries${query}`, isMinistryList)
+}
+
+export function getMinistry(accessToken: string, ministryId: string) {
+  return requestApi(accessToken, `/ministries/${ministryId}`, isMinistry)
+}
+
+export function createMinistry(accessToken: string, input: MinistryInput) {
+  return requestApi(accessToken, '/ministries', isMinistry, {
+    body: JSON.stringify(input),
+    method: 'POST',
+  })
+}
+
+export function updateMinistry(
+  accessToken: string,
+  ministryId: string,
+  input: MinistryInput,
+) {
+  return requestApi(accessToken, `/ministries/${ministryId}`, isMinistry, {
+    body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+export function archiveMinistry(accessToken: string, ministryId: string) {
+  return requestApi(accessToken, `/ministries/${ministryId}/archive`, isMinistry, {
+    method: 'PATCH',
+  })
+}
+
+export function getMinistryMembers(accessToken: string, ministryId: string) {
+  return requestApi(
+    accessToken,
+    `/ministries/${ministryId}/members`,
+    isMinistryMemberList,
+  )
+}
+
+export function assignMemberToMinistry(
+  accessToken: string,
+  ministryId: string,
+  memberId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/ministries/${ministryId}/members`,
+    isMinistryMember,
+    { body: JSON.stringify({ memberId }), method: 'POST' },
+  )
+}
+
+export function removeMemberFromMinistry(
+  accessToken: string,
+  ministryId: string,
+  memberId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/ministries/${ministryId}/members/${memberId}`,
+    isMinistryMember,
+    { method: 'DELETE' },
+  )
 }
 
 export function updateLifeGroup(

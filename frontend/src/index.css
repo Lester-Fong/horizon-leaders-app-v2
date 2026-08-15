@@ -292,6 +292,51 @@ p {
     align-self: end;
   }
 
+  .horizon-table--ministries {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--ministries thead,
+  .horizon-table--ministries tbody {
+    display: block;
+  }
+
+  .horizon-table--ministries thead {
+    display: none;
+  }
+
+  .horizon-table--ministries tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.55rem 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--hm-gray-200);
+  }
+
+  .horizon-table--ministries tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .horizon-table--ministries td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .horizon-table--ministries .ministry-cell-primary,
+  .horizon-table--ministries .ministry-cell-description,
+  .horizon-table--ministries .ministry-cell-status {
+    grid-column: 1;
+  }
+
+  .horizon-table--ministries .ministry-cell-actions {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+
   .hm-table-mobile-label {
     display: block;
     margin-bottom: 0.3rem;

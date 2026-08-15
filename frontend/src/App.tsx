@@ -1,7 +1,6 @@
 import {
   BookOpen,
   CalendarDays,
-  HandHeart,
   HeartHandshake,
   UserPlus,
   Users,
@@ -26,6 +25,12 @@ import { ThemeProvider } from './theme/ThemeContext'
 const MembersPage = lazy(() =>
   import('./pages/MembersPage').then((module) => ({
     default: module.MembersPage,
+  })),
+)
+
+const MinistriesPage = lazy(() =>
+  import('./pages/MinistriesPage').then((module) => ({
+    default: module.MinistriesPage,
   })),
 )
 
@@ -63,11 +68,16 @@ function App() {
               <Route
                 path="ministries"
                 element={
-                  <ModulePlaceholderPage
-                    title="Ministries"
-                    description="Ministry structure and management will follow once its product rules are approved."
-                    icon={HandHeart}
-                  />
+                  <Suspense
+                    fallback={
+                      <LoadingState
+                        title="Loading Ministries"
+                        description="Preparing the Ministry directory."
+                      />
+                    }
+                  >
+                    <MinistriesPage />
+                  </Suspense>
                 }
               />
               <Route

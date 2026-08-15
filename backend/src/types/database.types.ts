@@ -47,6 +47,36 @@ export type Database = {
           },
         ]
       }
+      member_ministries: {
+        Row: {
+          member_id: string
+          ministry_id: string
+        }
+        Insert: {
+          member_id: string
+          ministry_id: string
+        }
+        Update: {
+          member_id?: string
+          ministry_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_ministries_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_ministries_ministry_id_fkey"
+            columns: ["ministry_id"]
+            isOneToOne: false
+            referencedRelation: "ministries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       members: {
         Row: {
           address: string | null
@@ -108,6 +138,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ministries: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
