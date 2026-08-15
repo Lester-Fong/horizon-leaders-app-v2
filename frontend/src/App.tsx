@@ -5,14 +5,15 @@ import {
   HeartHandshake,
   UserPlus,
   Users,
-  UsersRound,
 } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 import { AuthProvider } from './auth/AuthContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { RoleRoute } from './auth/RoleRoute'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { LoadingState } from './components/ui/Feedback'
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
@@ -21,6 +22,12 @@ import { ModulePlaceholderPage } from './pages/ModulePlaceholderPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { UnauthorizedPage } from './pages/UnauthorizedPage'
 import { ThemeProvider } from './theme/ThemeContext'
+
+const MembersPage = lazy(() =>
+  import('./pages/MembersPage').then((module) => ({
+    default: module.MembersPage,
+  })),
+)
 
 function App() {
   return (
@@ -41,11 +48,16 @@ function App() {
               <Route
                 path="members"
                 element={
-                  <ModulePlaceholderPage
-                    title="Members"
-                    description="Member records and management belong to the approved Members feature phase."
-                    icon={UsersRound}
-                  />
+                  <Suspense
+                    fallback={
+                      <LoadingState
+                        title="Loading Members"
+                        description="Preparing the Member directory."
+                      />
+                    }
+                  >
+                    <MembersPage />
+                  </Suspense>
                 }
               />
               <Route

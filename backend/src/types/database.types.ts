@@ -47,6 +47,68 @@ export type Database = {
           },
         ]
       }
+      members: {
+        Row: {
+          address: string | null
+          birth_date: string | null
+          created_at: string
+          email: string | null
+          first_name: string
+          gender: Database["public"]["Enums"]["member_gender"] | null
+          id: string
+          is_active: boolean
+          last_name: string
+          life_group_id: string
+          normalized_email: string | null
+          normalized_phone: string | null
+          phone: string | null
+          qr_token: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          birth_date?: string | null
+          created_at?: string
+          email?: string | null
+          first_name: string
+          gender?: Database["public"]["Enums"]["member_gender"] | null
+          id?: string
+          is_active?: boolean
+          last_name: string
+          life_group_id: string
+          normalized_email?: string | null
+          normalized_phone?: string | null
+          phone?: string | null
+          qr_token: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          birth_date?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string
+          gender?: Database["public"]["Enums"]["member_gender"] | null
+          id?: string
+          is_active?: boolean
+          last_name?: string
+          life_group_id?: string
+          normalized_email?: string | null
+          normalized_phone?: string | null
+          phone?: string | null
+          qr_token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "members_life_group_id_fkey"
+            columns: ["life_group_id"]
+            isOneToOne: false
+            referencedRelation: "life_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -79,10 +141,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      normalize_member_email: { Args: { value: string }; Returns: string }
+      normalize_member_phone: { Args: { value: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "leader"
+      member_gender: "male" | "female"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -211,6 +275,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "leader"],
+      member_gender: ["male", "female"],
     },
   },
 } as const

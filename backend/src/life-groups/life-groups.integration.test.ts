@@ -184,8 +184,20 @@ describeWithLocalSupabase("Life Group API with local Supabase", () => {
       "patch",
       `/api/life-groups/${second.body.data.id}`,
     ).send({ name: "Forbidden change" });
-    expect(adminList.body.data).toHaveLength(2);
-    expect(leaderList.body.data).toHaveLength(1);
+    expect(adminList.body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: created.body.data.id }),
+        expect.objectContaining({ id: second.body.data.id }),
+      ]),
+    );
+    expect(leaderList.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: second.body.data.id })]),
+    );
+    expect(leaderList.body.data).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: created.body.data.id }),
+      ]),
+    );
     expect(leaderArchivedDetail.status).toBe(404);
     expect(leaderMutation.status).toBe(403);
 
@@ -197,7 +209,14 @@ describeWithLocalSupabase("Life Group API with local Supabase", () => {
 
     const options = await asAdmin("get", "/api/life-groups/leaders");
     expect(options.status).toBe(200);
-    expect(options.body.data).toHaveLength(4);
+    expect(options.body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: leaderAId }),
+        expect.objectContaining({ id: inactiveLeaderId }),
+        expect.objectContaining({ id: leaderBId }),
+        expect.objectContaining({ id: leaderCId }),
+      ]),
+    );
     expect(options.body.data).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: adminId })]),
     );

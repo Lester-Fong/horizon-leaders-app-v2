@@ -241,6 +241,57 @@ p {
     align-self: center;
   }
 
+  .horizon-table--members {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--members thead {
+    display: none;
+  }
+
+  .horizon-table--members tbody {
+    display: block;
+  }
+
+  .horizon-table--members tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--hm-gray-200);
+  }
+
+  .horizon-table--members tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .horizon-table--members td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .horizon-table--members .member-cell-primary,
+  .horizon-table--members .member-cell-contact {
+    grid-column: 1 / -1;
+  }
+
+  .horizon-table--members .member-cell-group {
+    grid-column: 1;
+  }
+
+  .horizon-table--members .member-cell-status {
+    grid-column: 2;
+  }
+
+  .horizon-table--members .member-cell-actions {
+    grid-column: 3;
+    grid-row: 3;
+    align-self: end;
+  }
+
   .hm-table-mobile-label {
     display: block;
     margin-bottom: 0.3rem;

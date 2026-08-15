@@ -37,6 +37,49 @@ export interface LifeGroupInput {
   name: string
 }
 
+export type MemberGender = 'male' | 'female'
+
+export interface MemberLifeGroup {
+  id: string
+  isActive: boolean
+  name: string
+}
+
+export interface Member {
+  address: string | null
+  birthDate: string | null
+  createdAt: string
+  email: string | null
+  firstName: string
+  gender: MemberGender | null
+  id: string
+  isActive: boolean
+  lastName: string
+  lifeGroup: MemberLifeGroup
+  phone: string | null
+  qrToken: string
+  updatedAt: string
+}
+
+export interface MemberInput {
+  address: string | null
+  birthDate: string | null
+  email: string | null
+  firstName: string
+  gender: MemberGender | null
+  lastName: string
+  lifeGroupId: string
+  phone: string | null
+}
+
+export type MemberListStatus = 'active' | 'archived' | 'all'
+
+export interface MemberListFilters {
+  lifeGroupId?: string
+  search?: string
+  status?: MemberListStatus
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -99,6 +142,34 @@ function isLeaderOption(value: unknown): value is LeaderOption {
     typeof assignedLifeGroup.id === 'string' &&
     typeof assignedLifeGroup.isActive === 'boolean' &&
     typeof assignedLifeGroup.name === 'string'
+  )
+}
+
+function isMemberLifeGroup(value: unknown): value is MemberLifeGroup {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.name === 'string'
+  )
+}
+
+function isMember(value: unknown): value is Member {
+  return (
+    isRecord(value) &&
+    (typeof value.address === 'string' || value.address === null) &&
+    (typeof value.birthDate === 'string' || value.birthDate === null) &&
+    typeof value.createdAt === 'string' &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    (value.gender === 'male' || value.gender === 'female' || value.gender === null) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.lastName === 'string' &&
+    isMemberLifeGroup(value.lifeGroup) &&
+    (typeof value.phone === 'string' || value.phone === null) &&
+    typeof value.qrToken === 'string' &&
+    typeof value.updatedAt === 'string'
   )
 }
 
@@ -168,6 +239,9 @@ const isLifeGroupList = (value: unknown): value is LifeGroup[] =>
 const isLeaderOptionList = (value: unknown): value is LeaderOption[] =>
   Array.isArray(value) && value.every(isLeaderOption)
 
+const isMemberList = (value: unknown): value is Member[] =>
+  Array.isArray(value) && value.every(isMember)
+
 export function getLifeGroups(accessToken: string) {
   return requestApi(accessToken, '/life-groups', isLifeGroupList)
 }
@@ -183,6 +257,48 @@ export function createLifeGroup(
   return requestApi(accessToken, '/life-groups', isLifeGroup, {
     body: JSON.stringify(input),
     method: 'POST',
+  })
+}
+
+export function createMember(accessToken: string, input: MemberInput) {
+  return requestApi(accessToken, '/members', isMember, {
+    body: JSON.stringify(input),
+    method: 'POST',
+  })
+}
+
+export function getMembers(
+  accessToken: string,
+  filters: MemberListFilters = {},
+) {
+  const searchParameters = new URLSearchParams()
+  if (filters.search) searchParameters.set('search', filters.search)
+  if (filters.lifeGroupId) {
+    searchParameters.set('lifeGroupId', filters.lifeGroupId)
+  }
+  if (filters.status) searchParameters.set('status', filters.status)
+  const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
+  return requestApi(accessToken, `/members${query}`, isMemberList)
+}
+
+export function getMember(accessToken: string, memberId: string) {
+  return requestApi(accessToken, `/members/${memberId}`, isMember)
+}
+
+export function updateMember(
+  accessToken: string,
+  memberId: string,
+  input: MemberInput,
+) {
+  return requestApi(accessToken, `/members/${memberId}`, isMember, {
+    body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+export function archiveMember(accessToken: string, memberId: string) {
+  return requestApi(accessToken, `/members/${memberId}/archive`, isMember, {
+    method: 'PATCH',
   })
 }
 
