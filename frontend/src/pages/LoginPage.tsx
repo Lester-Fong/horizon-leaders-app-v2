@@ -7,6 +7,7 @@ import { LoadingScreen } from '../components/LoadingScreen'
 import { Button } from '../components/ui/Button'
 import { FeedbackBanner } from '../components/ui/Feedback'
 import { FormField, TextInput } from '../components/ui/FormControls'
+import { ThemeToggle } from '../components/ui/ThemeToggle'
 
 export function LoginPage() {
   const { login, message: authMessage, status } = useAuth()
@@ -47,55 +48,58 @@ export function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-canvas lg:grid lg:grid-cols-[minmax(0,0.9fr)_minmax(32rem,1.1fr)]">
-      <section className="hidden bg-primary-strong px-12 py-14 text-white lg:flex lg:flex-col lg:justify-between">
+    <main className="w-full min-w-0 overflow-x-clip bg-canvas lg:grid lg:min-h-screen lg:grid-cols-[minmax(24rem,0.9fr)_minmax(32rem,1.1fr)]">
+      <section className="relative hidden overflow-hidden border-r border-line bg-surface px-12 py-12 lg:flex lg:flex-col lg:justify-between xl:px-16">
+        <div aria-hidden="true" className="hm-halftone absolute -right-24 bottom-12 h-80 w-80 rounded-full opacity-80" />
         <div className="flex items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-xl bg-white text-lg font-bold text-primary-strong">
+          <div className="grid size-10 place-items-center rounded-control border border-ink bg-ink font-mono text-sm font-semibold text-canvas">
             H
           </div>
           <div>
-            <p className="font-bold">Horizon Church</p>
-            <p className="text-sm text-white/70">Leaders workspace</p>
+            <p className="text-sm font-semibold text-ink">Horizon Church</p>
+            <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.08em] text-muted uppercase">Leaders workspace</p>
           </div>
         </div>
-        <div className="max-w-lg pb-8">
-          <p className="text-sm font-bold tracking-[0.2em] text-white/65 uppercase">
-            Church operations
+        <div className="relative z-10 max-w-lg pb-10">
+          <p className="hm-label">
+            01 — Church operations
           </p>
-          <h1 className="mt-5 text-4xl font-bold leading-tight tracking-tight xl:text-5xl">
+          <h1 className="mt-6 max-w-md font-display text-4xl leading-[1.05] font-medium tracking-[-0.055em] text-ink xl:text-5xl">
             Clear tools for thoughtful leadership.
           </h1>
-          <p className="mt-5 max-w-md text-base leading-7 text-white/75">
+          <p className="mt-6 max-w-sm text-[0.9375rem] leading-7 text-muted">
             Horizon keeps the operational workspace calm, readable, and focused on
             the people church leaders serve.
           </p>
         </div>
       </section>
 
-      <section className="grid min-h-screen place-items-center px-4 py-10 sm:px-8 lg:min-h-0">
-        <div className="w-full max-w-md">
+      <section className="relative grid min-w-0 min-h-screen place-items-center px-4 py-10 sm:px-8 lg:min-h-0">
+        <ThemeToggle compact className="absolute top-5 right-5 w-28 max-w-[calc(100vw-2.5rem)]" />
+        <div className="w-full min-w-0 max-w-md">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <div className="grid size-10 place-items-center rounded-xl bg-primary text-lg font-bold text-white">
+            <div className="grid size-10 place-items-center rounded-control border border-ink bg-ink font-mono text-sm font-semibold text-canvas">
               H
             </div>
             <div>
-              <p className="font-bold text-ink">Horizon Church</p>
-              <p className="text-xs text-muted">Leaders workspace</p>
+              <p className="text-sm font-semibold text-ink">Horizon Church</p>
+              <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.08em] text-muted uppercase">Leaders workspace</p>
             </div>
           </div>
 
-          <div className="rounded-card border border-line bg-surface p-6 shadow-soft sm:p-8">
-            <div className="grid size-11 place-items-center rounded-xl bg-primary-soft text-primary">
-              <LockKeyhole aria-hidden="true" className="size-5" />
+          <div className="border-t border-line pt-7">
+            <div className="grid size-10 place-items-center rounded-full border border-line-strong text-ink">
+              <LockKeyhole aria-hidden="true" className="size-4" />
             </div>
-            <h1 className="mt-5 text-3xl font-bold tracking-tight text-ink">
+            <p className="hm-label mt-7">Secure staff access</p>
+            <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-ink">
               Staff sign in
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted">
               Use your controlled Horizon staff account to continue.
             </p>
 
-            <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
+            <form className="mt-8 min-w-0 space-y-5" onSubmit={handleSubmit} noValidate>
               <FormField id="email" label="Email" required>
                 <TextInput
                   id="email"
@@ -144,7 +148,7 @@ export function LoginPage() {
             </form>
           </div>
 
-          <p className="mt-5 text-center text-xs leading-5 text-muted">
+          <p className="mt-7 font-mono text-[0.625rem] leading-5 tracking-[0.06em] text-muted uppercase">
             Access is limited to active Horizon staff accounts.
           </p>
         </div>

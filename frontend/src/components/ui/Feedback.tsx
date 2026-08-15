@@ -18,17 +18,17 @@ const feedbackStyles: Record<
   FeedbackTone,
   { container: string; icon: LucideIcon }
 > = {
-  info: { container: 'border-info/25 bg-info-soft text-info-strong', icon: Info },
+  info: { container: 'border-line-strong bg-surface text-muted-strong', icon: Info },
   success: {
-    container: 'border-success/25 bg-success-soft text-success-strong',
+    container: 'border-line-strong bg-surface text-muted-strong',
     icon: BadgeCheck,
   },
   warning: {
-    container: 'border-warning/30 bg-warning-soft text-warning-strong',
+    container: 'border-ink bg-surface text-ink',
     icon: TriangleAlert,
   },
   error: {
-    container: 'border-danger/25 bg-danger-soft text-danger-strong',
+    container: 'border-ink bg-surface text-ink',
     icon: CircleAlert,
   },
 }
@@ -54,7 +54,7 @@ export function FeedbackBanner({
       role={tone === 'error' ? 'alert' : 'status'}
       aria-live={tone === 'error' ? 'assertive' : 'polite'}
       className={cn(
-        'flex gap-3 rounded-xl border px-4 py-3 text-sm leading-6',
+        'flex gap-3 rounded-card border px-4 py-3 text-sm leading-6',
         style.container,
         className,
       )}
@@ -91,7 +91,7 @@ export function LoadingState({
       <div className="max-w-sm">
         <LoaderCircle
           aria-hidden="true"
-          className="mx-auto size-8 animate-spin text-primary"
+          className="mx-auto size-7 animate-spin text-ink"
         />
         <p className="mt-4 font-semibold text-ink">{title}</p>
         <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
@@ -114,12 +114,15 @@ export function EmptyState({
   title,
 }: EmptyStateProps) {
   return (
-    <section className="rounded-card border border-dashed border-line-strong bg-surface px-6 py-12 text-center">
-      <div className="mx-auto grid size-12 place-items-center rounded-xl bg-primary-soft text-primary">
-        <Icon aria-hidden="true" className="size-6" />
+    <section className="px-4 py-12 text-center sm:py-16">
+      <div className="relative mx-auto grid size-14 place-items-center">
+        <div aria-hidden="true" className="hm-halftone absolute inset-0 rounded-full opacity-70" />
+        <div className="relative grid size-9 place-items-center rounded-full border border-line-strong bg-canvas text-ink">
+          <Icon aria-hidden="true" className="size-4" />
+        </div>
       </div>
-      <h2 className="mt-5 text-lg font-bold text-ink">{title}</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted">
+      <h2 className="mt-5 text-lg font-semibold tracking-tight text-ink">{title}</h2>
+      <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted">
         {description}
       </p>
       {action && <div className="mt-6 flex justify-center">{action}</div>}
@@ -138,17 +141,17 @@ export function ErrorState({ action, code, description, title }: ErrorStateProps
   return (
     <section
       role="alert"
-      className="rounded-card border border-line bg-surface px-6 py-12 text-center shadow-soft"
+      className="border-y border-line px-6 py-12 text-center"
     >
-      <div className="mx-auto grid size-12 place-items-center rounded-xl bg-danger-soft text-danger">
-        <CircleX aria-hidden="true" className="size-6" />
+      <div className="mx-auto grid size-10 place-items-center rounded-full border border-line-strong text-ink">
+        <CircleX aria-hidden="true" className="size-5" />
       </div>
       {code && (
-        <p className="mt-5 text-xs font-bold tracking-[0.18em] text-danger uppercase">
+        <p className="hm-label mt-5">
           {code}
         </p>
       )}
-      <h1 className={cn('text-2xl font-bold text-ink', code ? 'mt-2' : 'mt-5')}>
+      <h1 className={cn('text-2xl font-semibold text-ink', code ? 'mt-2' : 'mt-5')}>
         {title}
       </h1>
       <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted sm:text-base">

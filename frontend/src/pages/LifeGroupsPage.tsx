@@ -1,4 +1,11 @@
-import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, Users } from 'lucide-react'
+import {
+  Archive,
+  ArchiveRestore,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Users,
+} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import { useAuth } from '../auth/useAuth'
@@ -15,8 +22,10 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui/FormControls'
+import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
+import { RowActionsMenu, type RowAction } from '../components/ui/RowActionsMenu'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import {
   ApiError,
@@ -68,6 +77,7 @@ export function LifeGroupsPage() {
   const [changingGroupId, setChangingGroupId] = useState<string | null>(null)
   const [editingGroup, setEditingGroup] = useState<LifeGroup | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [archiveGroup, setArchiveGroup] = useState<LifeGroup | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 
   const loadData = useCallback(async () => {
@@ -136,6 +146,7 @@ export function LifeGroupsPage() {
   }
 
   function closeForm() {
+    if (isSaving) return
     setEditingGroup(null)
     setForm(EMPTY_FORM)
     setFormError(null)
@@ -175,7 +186,9 @@ export function LifeGroupsPage() {
           ? `${savedGroup.name} was updated.`
           : `${savedGroup.name} was created.`,
       )
-      closeForm()
+      setEditingGroup(null)
+      setForm(EMPTY_FORM)
+      setIsFormOpen(false)
       const refreshedToken = await getAccessToken()
       setLeaders(await getLeaderOptions(refreshedToken))
     } catch (error) {
@@ -185,24 +198,48 @@ export function LifeGroupsPage() {
     }
   }
 
-  async function handleStatusChange(group: LifeGroup) {
+  async function changeGroupStatus(group: LifeGroup, isActive: boolean) {
     setChangingGroupId(group.id)
     setNotice(null)
     setLoadError(null)
     try {
       const token = await getAccessToken()
-      const updated = await setLifeGroupActive(token, group.id, !group.isActive)
+      const updated = await setLifeGroupActive(token, group.id, isActive)
       setGroups((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
+        current.map((currentGroup) =>
+          currentGroup.id === updated.id ? updated : currentGroup,
+        ),
       )
       setNotice(
         `${updated.name} was ${updated.isActive ? 'reactivated' : 'archived'}.`,
       )
+      setArchiveGroup(null)
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setChangingGroupId(null)
     }
+  }
+
+  function getRowActions(group: LifeGroup): RowAction[] {
+    return [
+      {
+        icon: Pencil,
+        label: 'Edit Life Group',
+        onSelect: () => openEditForm(group),
+      },
+      group.isActive
+        ? {
+            icon: Archive,
+            label: 'Archive Life Group',
+            onSelect: () => setArchiveGroup(group),
+          }
+        : {
+            icon: ArchiveRestore,
+            label: 'Reactivate Life Group',
+            onSelect: () => void changeGroupStatus(group, true),
+          },
+    ]
   }
 
   if (isLoading) {
@@ -227,6 +264,7 @@ export function LifeGroupsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
+        marker="03 — Organization"
         title="Life Groups"
         description={
           isAdmin
@@ -235,16 +273,16 @@ export function LifeGroupsPage() {
         }
         actions={
           <>
-            <Button variant="secondary" onClick={() => void loadData()}>
-              <RefreshCw aria-hidden="true" className="size-4" />
-              Refresh
-            </Button>
             {isAdmin && (
               <Button onClick={openCreateForm}>
                 <Plus aria-hidden="true" className="size-4" />
                 New Life Group
               </Button>
             )}
+            <Button variant="secondary" onClick={() => void loadData()}>
+              <RefreshCw aria-hidden="true" className="size-4" />
+              Refresh
+            </Button>
           </>
         }
       />
@@ -252,155 +290,67 @@ export function LifeGroupsPage() {
       {notice && <FeedbackBanner tone="success">{notice}</FeedbackBanner>}
       {loadError && <FeedbackBanner tone="error">{loadError}</FeedbackBanner>}
 
-      {isAdmin && isFormOpen && (
-        <section className="rounded-card border border-line bg-surface p-5 shadow-soft sm:p-6">
-          <div>
-            <h2 className="text-lg font-bold text-ink">
-              {editingGroup ? `Edit ${editingGroup.name}` : 'Create a Life Group'}
-            </h2>
-            <p className="mt-1 text-sm text-muted">
-              Every Life Group must have one active, unassigned Leader.
-            </p>
-          </div>
-          {formError && (
-            <FeedbackBanner className="mt-5" tone="error">
-              {formError}
-            </FeedbackBanner>
-          )}
-          <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-            <div className="grid gap-5 lg:grid-cols-2">
-              <FormField id="life-group-name" label="Name" required>
-                <TextInput
-                  id="life-group-name"
-                  value={form.name}
-                  maxLength={120}
-                  autoComplete="off"
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </FormField>
-              <FormField id="life-group-leader" label="Leader" required>
-                <Select
-                  id="life-group-leader"
-                  value={form.leaderProfileId}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      leaderProfileId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Select an available Leader</option>
-                  {selectableLeaders.map((leader) => (
-                    <option
-                      key={leader.id}
-                      value={leader.id}
-                      disabled={leader.disabled}
-                    >
-                      {leader.label}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-            </div>
-            <FormField
-              id="life-group-description"
-              label="Description"
-              description="Optional. Add a short, practical description for staff."
-            >
-              <TextArea
-                id="life-group-description"
-                value={form.description}
-                maxLength={1000}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <div className="flex flex-wrap gap-3">
-              <Button type="submit" isLoading={isSaving}>
-                {editingGroup ? 'Save changes' : 'Create Life Group'}
-              </Button>
-              <Button variant="secondary" onClick={closeForm} disabled={isSaving}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </section>
-      )}
-
       {groups.length === 0 ? (
         <EmptyState
           icon={Users}
           title="No Life Groups yet"
           description={
             isAdmin
-              ? 'Create the first Life Group when an active, unassigned Leader is ready.'
+              ? 'Use New Life Group above when an active, unassigned Leader is ready.'
               : 'There are no active Life Groups to show right now.'
-          }
-          action={
-            isAdmin ? <Button onClick={openCreateForm}>Create Life Group</Button> : undefined
           }
         />
       ) : (
-        <ResponsiveTable caption="Life Groups and assigned Leaders">
+        <ResponsiveTable
+          caption="Life Groups and assigned Leaders"
+          tableClassName="horizon-table--life-groups"
+        >
           <thead>
             <tr>
               <th scope="col">Life Group</th>
               <th scope="col">Leader</th>
               <th scope="col">Status</th>
-              {isAdmin && <th scope="col"><span className="sr-only">Actions</span></th>}
+              {isAdmin && (
+                <th scope="col" className="w-16">
+                  <span className="sr-only">Actions</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {groups.map((group) => (
               <tr key={group.id}>
-                <td>
-                  <p className="font-semibold text-ink">{group.name}</p>
+                <td className="life-group-cell-primary">
+                  <span className="hm-table-mobile-label">Life Group</span>
+                  <p className="font-medium text-ink">{group.name}</p>
                   {group.description && (
                     <p className="mt-1 max-w-lg text-sm text-muted">
                       {group.description}
                     </p>
                   )}
                 </td>
-                <td>
+                <td className="life-group-cell-leader">
+                  <span className="hm-table-mobile-label">Leader</span>
                   <p className="font-medium text-ink">{group.leader.name}</p>
                   {!group.leader.isActive && (
-                    <p className="mt-1 text-xs font-semibold text-warning-strong">
-                      Leader profile inactive
+                    <p className="mt-1 text-xs font-medium text-muted">
+                      Inactive Leader profile
                     </p>
                   )}
                 </td>
-                <td>
+                <td className="life-group-cell-status">
+                  <span className="hm-table-mobile-label">Status</span>
                   <StatusBadge tone={group.isActive ? 'success' : 'neutral'}>
                     {group.isActive ? 'Active' : 'Archived'}
                   </StatusBadge>
                 </td>
                 {isAdmin && (
-                  <td>
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => openEditForm(group)}>
-                        <Pencil aria-hidden="true" className="size-4" />
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        isLoading={changingGroupId === group.id}
-                        onClick={() => void handleStatusChange(group)}
-                      >
-                        {group.isActive ? (
-                          <Archive aria-hidden="true" className="size-4" />
-                        ) : (
-                          <ArchiveRestore aria-hidden="true" className="size-4" />
-                        )}
-                        {group.isActive ? 'Archive' : 'Reactivate'}
-                      </Button>
-                    </div>
+                  <td className="life-group-cell-actions text-right">
+                    <RowActionsMenu
+                      label={`Actions for ${group.name}`}
+                      actions={getRowActions(group)}
+                      disabled={changingGroupId === group.id}
+                    />
                   </td>
                 )}
               </tr>
@@ -408,6 +358,118 @@ export function LifeGroupsPage() {
           </tbody>
         </ResponsiveTable>
       )}
+
+      <Modal
+        isOpen={isAdmin && isFormOpen}
+        onClose={closeForm}
+        preventClose={isSaving}
+        title={editingGroup ? `Edit ${editingGroup.name}` : 'Create a Life Group'}
+        description="Every Life Group must have one active, unassigned Leader."
+      >
+        {formError && (
+          <FeedbackBanner className="mb-5" tone="error">
+            {formError}
+          </FeedbackBanner>
+        )}
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <FormField id="life-group-name" label="Name" required>
+            <TextInput
+              id="life-group-name"
+              data-modal-autofocus
+              value={form.name}
+              maxLength={120}
+              autoComplete="off"
+              disabled={isSaving}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, name: event.target.value }))
+              }
+            />
+          </FormField>
+          <FormField id="life-group-leader" label="Leader" required>
+            <Select
+              id="life-group-leader"
+              value={form.leaderProfileId}
+              disabled={isSaving}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  leaderProfileId: event.target.value,
+                }))
+              }
+            >
+              <option value="">Select an available Leader</option>
+              {selectableLeaders.map((leader) => (
+                <option
+                  key={leader.id}
+                  value={leader.id}
+                  disabled={leader.disabled}
+                >
+                  {leader.label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField
+            id="life-group-description"
+            label="Description"
+            description="Optional. Add a short, practical description for staff."
+          >
+            <TextArea
+              id="life-group-description"
+              value={form.description}
+              maxLength={1000}
+              disabled={isSaving}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+            />
+          </FormField>
+          <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={closeForm} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={isSaving}>
+              {editingGroup ? 'Save changes' : 'Create Life Group'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        className="max-w-md"
+        isOpen={Boolean(archiveGroup)}
+        onClose={() => setArchiveGroup(null)}
+        preventClose={Boolean(changingGroupId)}
+        title="Archive Life Group?"
+        description={
+          archiveGroup
+            ? `${archiveGroup.name} will leave the active list. Admins can reactivate it later.`
+            : undefined
+        }
+      >
+        <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
+          <Button
+            variant="secondary"
+            disabled={Boolean(changingGroupId)}
+            onClick={() => setArchiveGroup(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            isLoading={Boolean(changingGroupId)}
+            onClick={() => {
+              if (archiveGroup) void changeGroupStatus(archiveGroup, false)
+            }}
+          >
+            <Archive aria-hidden="true" className="size-4" />
+            Archive Life Group
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

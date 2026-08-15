@@ -5,10 +5,10 @@ import { cn } from '../../lib/cn'
 type StatusTone = 'neutral' | 'success' | 'warning' | 'error'
 
 const toneClasses: Record<StatusTone, string> = {
-  neutral: 'bg-surface-subtle text-muted ring-line-strong',
-  success: 'bg-success-soft text-success-strong ring-success/25',
-  warning: 'bg-warning-soft text-warning-strong ring-warning/30',
-  error: 'bg-danger-soft text-danger-strong ring-danger/25',
+  neutral: 'border-line-strong bg-canvas text-muted',
+  success: 'border-ink bg-ink text-canvas',
+  warning: 'border-ink bg-surface-subtle text-ink',
+  error: 'border-ink bg-canvas text-ink',
 }
 
 interface StatusBadgeProps {
@@ -25,7 +25,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+        'inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[0.6875rem] font-semibold tracking-[0.08em] uppercase',
         toneClasses[tone],
         className,
       )}

@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight,
   BookOpen,
   CalendarDays,
   HandHeart,
@@ -17,7 +18,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import { Button } from '../components/ui/Button'
-import { StatusBadge } from '../components/ui/StatusBadge'
+import { ThemeToggle } from '../components/ui/ThemeToggle'
 import { cn } from '../lib/cn'
 
 interface NavigationItem {
@@ -60,8 +61,9 @@ function PrimaryNavigation({ onNavigate }: NavigationProps) {
   )
 
   return (
-    <nav aria-label="Primary navigation" className="mt-7 flex-1">
-      <ul className="space-y-1">
+    <nav aria-label="Primary navigation" className="mt-8 flex-1">
+      <p className="hm-label px-3">Workspace</p>
+      <ul className="mt-3 space-y-0.5">
         {visibleItems.map((item) => {
           const Icon = item.icon
 
@@ -73,29 +75,35 @@ function PrimaryNavigation({ onNavigate }: NavigationProps) {
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   cn(
-                    'group flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold',
+                    'group relative flex min-h-10 items-center gap-3 rounded-control px-3 text-sm transition-colors duration-200 ease-out',
                     isActive
-                      ? 'bg-primary-soft text-primary-strong'
-                      : 'text-muted hover:bg-surface-subtle hover:text-ink',
+                      ? 'font-semibold text-ink'
+                      : 'font-medium text-muted hover:text-ink',
                   )
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <Icon
+                    <span
                       aria-hidden="true"
                       className={cn(
-                        'size-5 shrink-0',
-                        isActive
-                          ? 'text-primary'
-                          : 'text-muted group-hover:text-ink',
+                        'absolute left-0 h-4 w-px bg-ink transition-opacity',
+                        isActive ? 'opacity-100' : 'opacity-0',
                       )}
+                    />
+                    <Icon
+                      aria-hidden="true"
+                      strokeWidth={1.7}
+                      className="size-[1.05rem] shrink-0 text-muted transition-colors group-hover:text-ink"
                     />
                     <span>{item.label}</span>
                     {item.adminOnly && (
-                      <span className="ml-auto text-[0.65rem] font-bold tracking-wider text-muted uppercase">
+                      <span className="ml-auto font-mono text-[0.6rem] font-semibold tracking-[0.1em] text-muted uppercase">
                         Admin
                       </span>
+                    )}
+                    {isActive && (
+                      <ArrowUpRight aria-hidden="true" className="ml-auto size-3.5" />
                     )}
                   </>
                 )}
@@ -111,13 +119,49 @@ function PrimaryNavigation({ onNavigate }: NavigationProps) {
 function Brand() {
   return (
     <div className="flex items-center gap-3">
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-lg font-bold text-white shadow-sm">
+      <div className="grid size-9 shrink-0 place-items-center rounded-control border border-ink bg-ink font-mono text-sm font-semibold text-canvas">
         H
       </div>
       <div>
-        <p className="font-bold tracking-tight text-ink">Horizon Church</p>
-        <p className="text-xs font-medium text-muted">Leaders workspace</p>
+        <p className="text-sm font-semibold tracking-tight text-ink">Horizon Church</p>
+        <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.08em] text-muted uppercase">
+          Leaders workspace
+        </p>
       </div>
+    </div>
+  )
+}
+
+interface UserAreaProps {
+  actor: { name: string; role: string }
+  isSigningOut: boolean
+  onLogout(): void
+}
+
+function UserArea({ actor, isSigningOut, onLogout }: UserAreaProps) {
+  return (
+    <div className="border-t border-line pt-4">
+      <div className="flex items-center gap-3 px-2">
+        <div className="grid size-8 shrink-0 place-items-center rounded-full border border-line-strong font-mono text-[0.65rem] font-semibold text-ink">
+          {getInitials(actor.name)}
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-ink">{actor.name}</p>
+          <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.08em] text-muted uppercase">
+            {actor.role}
+          </p>
+        </div>
+      </div>
+      <ThemeToggle className="mt-4 px-2" />
+      <Button
+        variant="ghost"
+        className="mt-2 w-full justify-start"
+        isLoading={isSigningOut}
+        onClick={onLogout}
+      >
+        <LogOut aria-hidden="true" className="size-4" />
+        Sign out
+      </Button>
     </div>
   )
 }
@@ -130,16 +174,16 @@ export function AuthenticatedLayout() {
   const menuButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    if (!isMobileNavigationOpen) {
-      return
-    }
+    if (!isMobileNavigationOpen) return
 
     const menuButton = menuButtonRef.current
+    const appRoot = document.getElementById('main-content')
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    if (appRoot) appRoot.inert = true
 
     const focusableElements = drawerRef.current?.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      'a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
     )
     focusableElements?.[0]?.focus()
 
@@ -149,9 +193,7 @@ export function AuthenticatedLayout() {
         return
       }
 
-      if (event.key !== 'Tab' || !focusableElements?.length) {
-        return
-      }
+      if (event.key !== 'Tab' || !focusableElements?.length) return
 
       const firstElement = focusableElements[0]
       const lastElement = focusableElements[focusableElements.length - 1]
@@ -170,14 +212,13 @@ export function AuthenticatedLayout() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = previousOverflow
-
+      if (appRoot) appRoot.inert = false
       menuButton?.focus()
     }
   }, [isMobileNavigationOpen])
 
   async function handleLogout() {
     setIsSigningOut(true)
-
     try {
       await logout()
     } finally {
@@ -185,45 +226,35 @@ export function AuthenticatedLayout() {
     }
   }
 
-  if (!actor) {
-    return null
-  }
+  if (!actor) return null
 
   return (
-    <div className="min-h-screen bg-canvas md:grid md:grid-cols-[17rem_minmax(0,1fr)]">
+    <div className="min-h-screen bg-canvas md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
       <a
         href="#main-content"
-        className="fixed top-3 left-3 z-[70] -translate-y-20 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white focus:translate-y-0"
+        className="fixed top-3 left-3 z-[120] -translate-y-20 rounded-control bg-ink px-4 py-2 text-sm font-semibold text-canvas focus:translate-y-0"
       >
         Skip to main content
       </a>
 
-      <aside className="hidden h-screen flex-col border-r border-line bg-surface px-4 py-5 md:sticky md:top-0 md:flex">
-        <div className="px-2">
-          <Brand />
-        </div>
+      <aside className="hidden h-screen flex-col border-r border-line bg-canvas px-4 py-5 md:sticky md:top-0 md:flex">
+        <div className="px-2 pt-1"><Brand /></div>
         <PrimaryNavigation />
-        <div className="mt-5 border-t border-line pt-4">
-          <div className="flex items-center gap-3 rounded-xl bg-surface-subtle p-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-bold text-primary-strong">
-              {getInitials(actor.name)}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink">{actor.name}</p>
-              <p className="mt-0.5 text-xs capitalize text-muted">{actor.role}</p>
-            </div>
-          </div>
-        </div>
+        <UserArea
+          actor={actor}
+          isSigningOut={isSigningOut}
+          onLogout={() => void handleLogout()}
+        />
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between border-b border-line bg-surface/95 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between border-b border-line bg-canvas/95 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Button
               ref={menuButtonRef}
               variant="ghost"
               size="sm"
-              className="-ml-2 px-2 md:hidden"
+              className="-ml-2 size-10 px-0 md:hidden"
               aria-label="Open navigation"
               aria-expanded={isMobileNavigationOpen}
               aria-controls="mobile-navigation"
@@ -231,53 +262,33 @@ export function AuthenticatedLayout() {
             >
               <Menu aria-hidden="true" className="size-5" />
             </Button>
-            <div className="md:hidden">
-              <p className="truncate text-sm font-bold text-ink">Horizon Church</p>
-              <p className="text-xs text-muted">Leaders workspace</p>
-            </div>
-            <p className="hidden text-sm font-semibold text-muted md:block">
-              Horizon operations
-            </p>
+            <div className="md:hidden"><Brand /></div>
+            <p className="hm-label hidden md:block">Horizon / Operations</p>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <p className="max-w-52 truncate text-sm font-semibold text-ink">
-                {actor.name}
-              </p>
-              <p className="text-xs capitalize text-muted">{actor.role}</p>
-            </div>
-            <StatusBadge tone="success" className="hidden lg:inline-flex">
-              Active
-            </StatusBadge>
-            <Button
-              variant="ghost"
-              size="sm"
-              isLoading={isSigningOut}
-              className="hidden md:inline-flex"
-              onClick={() => void handleLogout()}
-            >
-              <LogOut aria-hidden="true" className="size-4" />
-              Sign out
-            </Button>
+            <p className="hidden max-w-52 truncate text-xs font-medium text-muted sm:block">
+              {actor.name}
+            </p>
+            <span className="size-1.5 rounded-full bg-ink" aria-label="Account active" />
           </div>
         </header>
 
         <main
           id="main-content"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[80rem] px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10"
+          className="mx-auto w-full max-w-[76rem] px-4 py-7 sm:px-6 sm:py-9 lg:px-8 lg:py-11"
         >
           <Outlet />
         </main>
       </div>
 
       {isMobileNavigationOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div className="hm-overlay-enter fixed inset-0 z-50 md:hidden">
           <button
             type="button"
             aria-label="Close navigation"
-            className="absolute inset-0 bg-ink/45"
+            className="absolute inset-0 bg-[var(--hm-overlay)] backdrop-blur-[2px]"
             onClick={() => setIsMobileNavigationOpen(false)}
           />
           <div
@@ -286,45 +297,26 @@ export function AuthenticatedLayout() {
             role="dialog"
             aria-modal="true"
             aria-label="Main navigation"
-            className="relative flex h-full w-[min(88vw,20rem)] flex-col bg-surface px-4 py-5 shadow-2xl"
+            className="hm-dialog-enter relative flex h-full w-[min(88vw,20rem)] flex-col border-r border-line bg-canvas px-4 py-5 shadow-soft"
           >
             <div className="flex items-start justify-between gap-3 px-2">
               <Brand />
               <Button
                 variant="ghost"
                 size="sm"
-                className="-mt-1 px-2"
+                className="-mt-1 size-10 px-0"
                 aria-label="Close navigation"
                 onClick={() => setIsMobileNavigationOpen(false)}
               >
                 <X aria-hidden="true" className="size-5" />
               </Button>
             </div>
-            <PrimaryNavigation
-              onNavigate={() => setIsMobileNavigationOpen(false)}
+            <PrimaryNavigation onNavigate={() => setIsMobileNavigationOpen(false)} />
+            <UserArea
+              actor={actor}
+              isSigningOut={isSigningOut}
+              onLogout={() => void handleLogout()}
             />
-            <div className="mt-5 border-t border-line pt-4">
-              <div className="mb-3 flex items-center gap-3 px-2">
-                <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-bold text-primary-strong">
-                  {getInitials(actor.name)}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ink">
-                    {actor.name}
-                  </p>
-                  <p className="text-xs capitalize text-muted">{actor.role}</p>
-                </div>
-              </div>
-              <Button
-                variant="secondary"
-                className="w-full"
-                isLoading={isSigningOut}
-                onClick={() => void handleLogout()}
-              >
-                <LogOut aria-hidden="true" className="size-4" />
-                Sign out
-              </Button>
-            </div>
           </div>
         </div>
       )}

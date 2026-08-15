@@ -26,11 +26,11 @@ export function FormField({
 }: FormFieldProps) {
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-semibold text-ink">
+      <label htmlFor={id} className="block text-sm font-medium text-ink">
         {label}
         {required && (
-          <span aria-hidden="true" className="ml-1 text-danger">
-            *
+          <span aria-hidden="true" className="ml-1 text-muted">
+            (required)
           </span>
         )}
       </label>
@@ -41,8 +41,8 @@ export function FormField({
       )}
       <div className="mt-2">{children}</div>
       {error && (
-        <p id={`${id}-error`} role="alert" className="mt-2 text-sm text-danger">
-          {error}
+        <p id={`${id}-error`} role="alert" className="mt-2 text-sm font-medium text-ink">
+          Error: {error}
         </p>
       )}
     </div>
@@ -58,8 +58,8 @@ export function TextInput({ className, hasError, ...inputProps }: TextInputProps
     <input
       {...inputProps}
       className={cn(
-        'min-h-11 w-full rounded-lg border bg-surface px-3 py-2 text-base text-ink shadow-xs placeholder:text-muted/75 disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
-        hasError ? 'border-danger' : 'border-line-strong hover:border-muted/60',
+        'min-h-11 w-full rounded-input border bg-surface px-3 py-2 text-base text-ink placeholder:text-muted disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
+        hasError ? 'border-ink' : 'border-line-strong hover:border-muted',
         className,
       )}
     />
@@ -75,8 +75,8 @@ export function Select({ className, hasError, ...selectProps }: SelectProps) {
     <select
       {...selectProps}
       className={cn(
-        'min-h-11 w-full rounded-lg border bg-surface px-3 py-2 text-base text-ink shadow-xs disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
-        hasError ? 'border-danger' : 'border-line-strong hover:border-muted/60',
+        'min-h-11 w-full rounded-input border bg-surface px-3 py-2 text-base text-ink disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
+        hasError ? 'border-ink' : 'border-line-strong hover:border-muted',
         className,
       )}
     />
@@ -92,8 +92,8 @@ export function TextArea({ className, hasError, ...textAreaProps }: TextAreaProp
     <textarea
       {...textAreaProps}
       className={cn(
-        'min-h-28 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-base text-ink shadow-xs placeholder:text-muted/75 disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
-        hasError ? 'border-danger' : 'border-line-strong hover:border-muted/60',
+        'min-h-28 w-full resize-y rounded-input border bg-surface px-3 py-2 text-base text-ink placeholder:text-muted disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted sm:text-sm',
+        hasError ? 'border-ink' : 'border-line-strong hover:border-muted',
         className,
       )}
     />

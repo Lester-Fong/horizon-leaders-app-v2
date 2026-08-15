@@ -20,13 +20,15 @@ import { LifeGroupsPage } from './pages/LifeGroupsPage'
 import { ModulePlaceholderPage } from './pages/ModulePlaceholderPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { UnauthorizedPage } from './pages/UnauthorizedPage'
+import { ThemeProvider } from './theme/ThemeContext'
 
 function App() {
   return (
     <BrowserRouter>
-      <AppErrorBoundary>
-        <AuthProvider>
-          <Routes>
+      <ThemeProvider>
+        <AppErrorBoundary>
+          <AuthProvider>
+            <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route
               element={
@@ -115,9 +117,10 @@ function App() {
               <Route path="unauthorized" element={<UnauthorizedPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
-          </Routes>
-        </AuthProvider>
-      </AppErrorBoundary>
+            </Routes>
+          </AuthProvider>
+        </AppErrorBoundary>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

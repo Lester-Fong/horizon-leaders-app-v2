@@ -16,7 +16,11 @@ export function ModulePlaceholderPage({
 }: ModulePlaceholderPageProps) {
   return (
     <div className="space-y-8">
-      <PageHeader title={title} description={description} />
+      <PageHeader
+        marker="Horizon — Planned module"
+        title={title}
+        description={description}
+      />
       <EmptyState
         icon={icon}
         title={`${title} is coming in a later phase`}

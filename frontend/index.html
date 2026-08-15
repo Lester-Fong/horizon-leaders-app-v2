@@ -7,8 +7,24 @@
       name="description"
       content="Horizon Church V2 application foundation"
     />
-    <meta name="theme-color" content="#071611" />
+    <meta name="theme-color" content="#ffffff" />
     <title>Horizon Church V2</title>
+    <script>
+      ;(() => {
+        const storedTheme = localStorage.getItem('horizon-theme')
+        const theme =
+          storedTheme === 'light' || storedTheme === 'dark'
+            ? storedTheme
+            : matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+        document.documentElement.dataset.theme = theme
+        document.documentElement.style.colorScheme = theme
+        document
+          .querySelector('meta[name="theme-color"]')
+          ?.setAttribute('content', theme === 'dark' ? '#0c0c0f' : '#ffffff')
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
