@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { createSupabaseAuthService } from "./auth/supabase-auth-service.js";
 import { config } from "./config/environment.js";
+import { createSupabaseEventService } from "./events/supabase-event-service.js";
 import { createSupabaseGatheringService } from "./gatherings/supabase-gathering-service.js";
 import { createSupabaseLifeGroupService } from "./life-groups/supabase-life-group-service.js";
 import { createSupabaseMemberService } from "./members/supabase-member-service.js";
@@ -12,6 +13,10 @@ const authService = createSupabaseAuthService({
   supabaseUrl: config.supabaseUrl,
 });
 const lifeGroupService = createSupabaseLifeGroupService({
+  serviceRoleKey: config.supabaseServiceRoleKey,
+  supabaseUrl: config.supabaseUrl,
+});
+const eventService = createSupabaseEventService({
   serviceRoleKey: config.supabaseServiceRoleKey,
   supabaseUrl: config.supabaseUrl,
 });
@@ -36,6 +41,7 @@ const visitorService = createSupabaseVisitorService({
 
 const app = createApp({
   authService,
+  eventService,
   frontendOrigin: config.frontendOrigin,
   gatheringService,
   lifeGroupService,

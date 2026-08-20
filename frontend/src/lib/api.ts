@@ -168,6 +168,57 @@ export interface AttendanceMutationResult {
   memberId: string
 }
 
+export type SundayServiceStatus = 'open' | 'closed'
+
+export interface SundayService {
+  attendanceCount: number
+  countsForAbsence: boolean
+  createdAt: string
+  createdBy: { id: string; name: string }
+  description: string | null
+  eligibilityCount: number
+  eventDate: string
+  id: string
+  location: string | null
+  status: SundayServiceStatus
+  title: string
+  updatedAt: string
+  visitorCount: number
+}
+
+export interface SundayServiceInput {
+  countsForAbsence: boolean
+  description: string | null
+  eventDate: string
+  location: string | null
+  title: string
+}
+
+export interface SundayAttendanceMember {
+  attendanceStatus: 'present' | 'not_checked_in' | 'absent' | 'not_counted'
+  email: string | null
+  firstName: string
+  id: string
+  isActive: boolean
+  isPresent: boolean
+  lastName: string
+  lifeGroup: { id: string; name: string }
+  phone: string | null
+}
+
+export interface SundayVisitorRegistration {
+  createdAt: string
+  registeredBy: { id: string; name: string }
+  visitor: {
+    email: string | null
+    firstName: string
+    id: string
+    lastName: string
+    phone: string | null
+    status: VisitorStatus
+  }
+}
+
 export type VisitorStatus = 'active' | 'converted'
 export type VisitorListStatus = VisitorStatus | 'all'
 
@@ -203,16 +254,19 @@ export interface VisitorConversionResult {
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  readonly details: unknown
 
   constructor(
     status: number,
     code: string,
     message: string,
+    details?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -399,6 +453,61 @@ function isAttendanceMutationResult(
   )
 }
 
+function isSundayService(value: unknown): value is SundayService {
+  return (
+    isRecord(value) &&
+    typeof value.attendanceCount === 'number' &&
+    typeof value.countsForAbsence === 'boolean' &&
+    typeof value.createdAt === 'string' &&
+    isRecord(value.createdBy) &&
+    typeof value.createdBy.id === 'string' &&
+    typeof value.createdBy.name === 'string' &&
+    (typeof value.description === 'string' || value.description === null) &&
+    typeof value.eligibilityCount === 'number' &&
+    typeof value.eventDate === 'string' &&
+    typeof value.id === 'string' &&
+    (typeof value.location === 'string' || value.location === null) &&
+    (value.status === 'open' || value.status === 'closed') &&
+    typeof value.title === 'string' &&
+    typeof value.updatedAt === 'string' &&
+    typeof value.visitorCount === 'number'
+  )
+}
+
+function isSundayAttendanceMember(value: unknown): value is SundayAttendanceMember {
+  return (
+    isRecord(value) &&
+    ['present', 'not_checked_in', 'absent', 'not_counted'].includes(String(value.attendanceStatus)) &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.isPresent === 'boolean' &&
+    typeof value.lastName === 'string' &&
+    isRecord(value.lifeGroup) &&
+    typeof value.lifeGroup.id === 'string' &&
+    typeof value.lifeGroup.name === 'string' &&
+    (typeof value.phone === 'string' || value.phone === null)
+  )
+}
+
+function isSundayVisitorRegistration(value: unknown): value is SundayVisitorRegistration {
+  return (
+    isRecord(value) &&
+    typeof value.createdAt === 'string' &&
+    isRecord(value.registeredBy) &&
+    typeof value.registeredBy.id === 'string' &&
+    typeof value.registeredBy.name === 'string' &&
+    isRecord(value.visitor) &&
+    typeof value.visitor.id === 'string' &&
+    typeof value.visitor.firstName === 'string' &&
+    typeof value.visitor.lastName === 'string' &&
+    (typeof value.visitor.phone === 'string' || value.visitor.phone === null) &&
+    (typeof value.visitor.email === 'string' || value.visitor.email === null) &&
+    (value.visitor.status === 'active' || value.visitor.status === 'converted')
+  )
+}
+
 function isVisitor(value: unknown): value is Visitor {
   return (
     isRecord(value) &&
@@ -423,13 +532,13 @@ function readApiError(payload: unknown) {
     return undefined
   }
 
-  const { code, message } = payload.error
+  const { code, details, message } = payload.error
 
   if (typeof code !== 'string' || typeof message !== 'string') {
     return undefined
   }
 
-  return { code, message }
+  return { code, details, message }
 }
 
 const apiUrl = import.meta.env.VITE_API_URL?.trim()
@@ -464,6 +573,7 @@ async function requestApi<T>(
       response.status,
       apiError?.code ?? 'REQUEST_FAILED',
       apiError?.message ?? 'Unable to complete the request.',
+      apiError?.details,
     )
   }
 
@@ -495,6 +605,36 @@ const isMinistryMemberList = (value: unknown): value is MinistryMember[] =>
 
 const isVisitorList = (value: unknown): value is Visitor[] =>
   Array.isArray(value) && value.every(isVisitor)
+
+const isSundayServiceDirectory = (
+  value: unknown,
+): value is { events: SundayService[] } =>
+  isRecord(value) && Array.isArray(value.events) && value.events.every(isSundayService)
+
+const isSundayAttendanceRoster = (
+  value: unknown,
+): value is { members: SundayAttendanceMember[] } =>
+  isRecord(value) && Array.isArray(value.members) && value.members.every(isSundayAttendanceMember)
+
+const isSundayVisitorRoster = (
+  value: unknown,
+): value is { registrations: SundayVisitorRegistration[] } =>
+  isRecord(value) && Array.isArray(value.registrations) && value.registrations.every(isSundayVisitorRegistration)
+
+const isAttendanceResult = (
+  value: unknown,
+): value is { memberId: string; result: 'recorded' | 'already_present' | 'removed' } =>
+  isRecord(value) && typeof value.memberId === 'string' && ['recorded', 'already_present', 'removed'].includes(String(value.result))
+
+const isQrAttendanceResult = (
+  value: unknown,
+): value is { member: SundayAttendanceMember; result: 'recorded' | 'already_present' } =>
+  isRecord(value) && isSundayAttendanceMember(value.member) && ['recorded', 'already_present'].includes(String(value.result))
+
+const isVisitorRegistrationResult = (
+  value: unknown,
+): value is { result: 'registered' | 'already_registered' | 'removed'; visitorId: string } =>
+  isRecord(value) && typeof value.visitorId === 'string' && ['registered', 'already_registered', 'removed'].includes(String(value.result))
 
 export function getLifeGroups(accessToken: string) {
   return requestApi(accessToken, '/life-groups', isLifeGroupList)
@@ -714,6 +854,72 @@ export function removeGatheringAttendance(
     isAttendanceMutationResult,
     { method: 'DELETE' },
   )
+}
+
+export function getSundayServices(accessToken: string) {
+  return requestApi(accessToken, '/events', isSundayServiceDirectory)
+}
+
+export function getSundayService(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}`, isSundayService)
+}
+
+export function createSundayService(accessToken: string, input: SundayServiceInput) {
+  return requestApi(accessToken, '/events', isSundayService, {
+    body: JSON.stringify(input),
+    method: 'POST',
+  })
+}
+
+export function updateSundayService(accessToken: string, eventId: string, input: SundayServiceInput) {
+  return requestApi(accessToken, `/events/${eventId}`, isSundayService, {
+    body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+export function closeSundayService(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}/close`, isSundayService, { method: 'POST' })
+}
+
+export function getSundayAttendance(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}/attendance`, isSundayAttendanceRoster)
+}
+
+export function markSundayAttendance(accessToken: string, eventId: string, memberId: string) {
+  return requestApi(accessToken, `/events/${eventId}/attendance`, isAttendanceResult, {
+    body: JSON.stringify({ memberId }), method: 'POST',
+  })
+}
+
+export function checkInSundayAttendanceByQr(accessToken: string, eventId: string, qrToken: string) {
+  return requestApi(accessToken, `/events/${eventId}/attendance/qr`, isQrAttendanceResult, {
+    body: JSON.stringify({ qrToken }), method: 'POST',
+  })
+}
+
+export function removeSundayAttendance(accessToken: string, eventId: string, memberId: string) {
+  return requestApi(accessToken, `/events/${eventId}/attendance/${memberId}`, isAttendanceResult, { method: 'DELETE' })
+}
+
+export function getSundayVisitors(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}/visitors`, isSundayVisitorRoster)
+}
+
+export function registerSundayVisitor(accessToken: string, eventId: string, visitorId: string) {
+  return requestApi(accessToken, `/events/${eventId}/visitors`, isVisitorRegistrationResult, {
+    body: JSON.stringify({ visitorId }), method: 'POST',
+  })
+}
+
+export function createAndRegisterSundayVisitor(accessToken: string, eventId: string, input: VisitorInput) {
+  return requestApi(accessToken, `/events/${eventId}/visitors/new`, isVisitorRegistrationResult, {
+    body: JSON.stringify(input), method: 'POST',
+  })
+}
+
+export function removeSundayVisitor(accessToken: string, eventId: string, visitorId: string) {
+  return requestApi(accessToken, `/events/${eventId}/visitors/${visitorId}`, isVisitorRegistrationResult, { method: 'DELETE' })
 }
 
 export function getVisitors(

@@ -1,6 +1,5 @@
 import {
   BookOpen,
-  CalendarDays,
   HeartHandshake,
   Users,
 } from 'lucide-react'
@@ -43,6 +42,14 @@ const VisitorsPage = lazy(() =>
   import('./pages/VisitorsPage').then((module) => ({
     default: module.VisitorsPage,
   })),
+)
+
+const EventsPage = lazy(() =>
+  import('./pages/EventsPage').then((module) => ({ default: module.EventsPage })),
+)
+
+const SundayServicePage = lazy(() =>
+  import('./pages/SundayServicePage').then((module) => ({ default: module.SundayServicePage })),
 )
 
 function App() {
@@ -113,11 +120,17 @@ function App() {
               <Route
                 path="events"
                 element={
-                  <ModulePlaceholderPage
-                    title="Events"
-                    description="Sunday Service, Harvest, and Other Event behavior is not implemented in this shell phase."
-                    icon={CalendarDays}
-                  />
+                  <Suspense fallback={<LoadingState title="Loading Events" description="Preparing the Sunday Service directory." />}>
+                    <EventsPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="events/:eventId"
+                element={
+                  <Suspense fallback={<LoadingState title="Loading Service" description="Preparing attendance and Sunday Visitors." />}>
+                    <SundayServicePage />
+                  </Suspense>
                 }
               />
               <Route

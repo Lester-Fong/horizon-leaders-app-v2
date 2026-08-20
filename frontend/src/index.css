@@ -427,6 +427,65 @@ p {
     align-self: center;
   }
 
+  .horizon-table--events,
+  .horizon-table--service-attendance,
+  .horizon-table--service-visitors,
+  .horizon-table--events tbody,
+  .horizon-table--service-attendance tbody,
+  .horizon-table--service-visitors tbody {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--events thead,
+  .horizon-table--service-attendance thead,
+  .horizon-table--service-visitors thead {
+    display: none;
+  }
+
+  .horizon-table--events tbody tr,
+  .horizon-table--service-attendance tbody tr,
+  .horizon-table--service-visitors tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.7rem 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--hm-gray-200);
+  }
+
+  .horizon-table--events td,
+  .horizon-table--service-attendance td,
+  .horizon-table--service-visitors td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .event-cell-primary,
+  .event-cell-date,
+  .event-cell-counting,
+  .event-cell-attendance,
+  .event-cell-status,
+  .attendance-cell-primary,
+  .attendance-cell-group,
+  .attendance-cell-contact,
+  .attendance-cell-status,
+  .service-visitor-cell-primary,
+  .service-visitor-cell-contact,
+  .service-visitor-cell-status,
+  .service-visitor-cell-actor {
+    grid-column: 1;
+  }
+
+  .event-cell-actions,
+  .attendance-cell-actions,
+  .service-visitor-cell-actions {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
   .hm-table-mobile-label {
     display: block;
     margin-bottom: 0.3rem;

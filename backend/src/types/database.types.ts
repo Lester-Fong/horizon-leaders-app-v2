@@ -9,6 +9,56 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      events: {
+        Row: {
+          counts_for_absence: boolean
+          created_at: string
+          created_by_profile_id: string
+          description: string | null
+          event_date: string
+          id: string
+          location: string | null
+          status: Database["public"]["Enums"]["event_status"]
+          title: string
+          type: Database["public"]["Enums"]["event_type"]
+          updated_at: string
+        }
+        Insert: {
+          counts_for_absence?: boolean
+          created_at?: string
+          created_by_profile_id: string
+          description?: string | null
+          event_date: string
+          id?: string
+          location?: string | null
+          status?: Database["public"]["Enums"]["event_status"]
+          title: string
+          type: Database["public"]["Enums"]["event_type"]
+          updated_at?: string
+        }
+        Update: {
+          counts_for_absence?: boolean
+          created_at?: string
+          created_by_profile_id?: string
+          description?: string | null
+          event_date?: string
+          id?: string
+          location?: string | null
+          status?: Database["public"]["Enums"]["event_status"]
+          title?: string
+          type?: Database["public"]["Enums"]["event_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_created_by_profile_id_fkey"
+            columns: ["created_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_group_gathering_attendance: {
         Row: {
           gathering_id: string
@@ -274,6 +324,119 @@ export type Database = {
         }
         Relationships: []
       }
+      sunday_service_eligibility: {
+        Row: {
+          event_id: string
+          life_group_id_at_close: string
+          member_id: string
+        }
+        Insert: {
+          event_id: string
+          life_group_id_at_close: string
+          member_id: string
+        }
+        Update: {
+          event_id?: string
+          life_group_id_at_close?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunday_service_eligibility_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_service_eligibility_life_group_id_at_close_fkey"
+            columns: ["life_group_id_at_close"]
+            isOneToOne: false
+            referencedRelation: "life_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_service_eligibility_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sunday_service_presence: {
+        Row: {
+          event_id: string
+          member_id: string
+        }
+        Insert: {
+          event_id: string
+          member_id: string
+        }
+        Update: {
+          event_id?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunday_service_presence_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_service_presence_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sunday_service_visitor_registrations: {
+        Row: {
+          created_at: string
+          event_id: string
+          registered_by_profile_id: string
+          visitor_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          registered_by_profile_id: string
+          visitor_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          registered_by_profile_id?: string
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunday_service_visitor_registrations_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_service_visitor_registrations_registered_by_profile_id_f"
+            columns: ["registered_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_service_visitor_registrations_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       visitors: {
         Row: {
           converted_member_id: string | null
@@ -329,6 +492,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      close_sunday_service: {
+        Args: { p_event_id: string }
+        Returns: {
+          eligibility_count: number
+          outcome: string
+        }[]
+      }
       convert_visitor_to_member: {
         Args: {
           p_life_group_id: string
@@ -342,11 +512,31 @@ export type Database = {
           outcome: string
         }[]
       }
+      create_sunday_visitor_registration: {
+        Args: {
+          p_email: string
+          p_event_id: string
+          p_first_name: string
+          p_last_name: string
+          p_phone: string
+          p_registered_by_profile_id: string
+        }
+        Returns: {
+          conflict_field: string
+          conflicting_member_id: string
+          conflicting_visitor_id: string
+          conflicting_visitor_status: Database["public"]["Enums"]["visitor_status"]
+          created_visitor_id: string
+          outcome: string
+        }[]
+      }
       normalize_member_email: { Args: { value: string }; Returns: string }
       normalize_member_phone: { Args: { value: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "leader"
+      event_status: "open" | "closed"
+      event_type: "service" | "harvest" | "other"
       member_gender: "male" | "female"
       visitor_status: "active" | "converted"
     }
@@ -477,6 +667,8 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "leader"],
+      event_status: ["open", "closed"],
+      event_type: ["service", "harvest", "other"],
       member_gender: ["male", "female"],
       visitor_status: ["active", "converted"],
     },

@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 
 import type { AuthService } from "./auth/types.js";
+import { EventServiceError, type EventService } from "./events/types.js";
 import {
   GatheringServiceError,
   type GatheringService,
@@ -16,6 +17,7 @@ import {
   type MinistryService,
 } from "./ministries/types.js";
 import { healthRouter } from "./routes/health.js";
+import { createEventsRouter } from "./routes/events.js";
 import { createGatheringsRouter } from "./routes/gatherings.js";
 import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
@@ -29,6 +31,7 @@ import {
 
 export interface AppDependencies {
   authService: AuthService;
+  eventService?: EventService;
   frontendOrigin?: string;
   gatheringService?: GatheringService;
   lifeGroupService?: LifeGroupService;
@@ -38,6 +41,22 @@ export interface AppDependencies {
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
+
+const unavailableEventService: EventService = {
+  addAttendance: async () => unavailableEvent(),
+  addAttendanceByQr: async () => unavailableEvent(),
+  close: async () => unavailableEvent(),
+  create: async () => unavailableEvent(),
+  getAttendance: async () => unavailableEvent(),
+  getById: async () => unavailableEvent(),
+  list: async () => unavailableEvent(),
+  listVisitors: async () => unavailableEvent(),
+  registerExistingVisitor: async () => unavailableEvent(),
+  registerNewVisitor: async () => unavailableEvent(),
+  removeAttendance: async () => unavailableEvent(),
+  removeVisitor: async () => unavailableEvent(),
+  update: async () => unavailableEvent(),
+};
 
 const unavailableLifeGroupService: LifeGroupService = {
   create: async () => unavailable(),
@@ -93,6 +112,10 @@ function unavailable(): never {
   );
 }
 
+function unavailableEvent(): never {
+  throw new EventServiceError(500, "EVENT_SERVICE_UNAVAILABLE", "Sunday Service data is temporarily unavailable.");
+}
+
 function unavailableMember(): never {
   throw new MemberServiceError(
     500,
@@ -127,6 +150,7 @@ function unavailableVisitor(): never {
 
 export function createApp({
   authService,
+  eventService = unavailableEventService,
   frontendOrigin = DEFAULT_FRONTEND_ORIGIN,
   gatheringService = unavailableGatheringService,
   lifeGroupService = unavailableLifeGroupService,
@@ -140,6 +164,7 @@ export function createApp({
   app.use(express.json());
   app.use("/api", healthRouter);
   app.use("/api", createMeRouter(authService));
+  app.use("/api", createEventsRouter(authService, eventService));
   app.use("/api", createLifeGroupsRouter(authService, lifeGroupService));
   app.use("/api", createGatheringsRouter(authService, gatheringService));
   app.use("/api", createMembersRouter(authService, memberService));
