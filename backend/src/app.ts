@@ -4,6 +4,10 @@ import express from "express";
 import type { AuthService } from "./auth/types.js";
 import { EventServiceError, type EventService } from "./events/types.js";
 import {
+  FollowUpServiceError,
+  type FollowUpService,
+} from "./follow-ups/types.js";
+import {
   GatheringServiceError,
   type GatheringService,
 } from "./gatherings/types.js";
@@ -18,6 +22,7 @@ import {
 } from "./ministries/types.js";
 import { healthRouter } from "./routes/health.js";
 import { createEventsRouter } from "./routes/events.js";
+import { createFollowUpsRouter } from "./routes/follow-ups.js";
 import { createGatheringsRouter } from "./routes/gatherings.js";
 import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
@@ -32,6 +37,7 @@ import {
 export interface AppDependencies {
   authService: AuthService;
   eventService?: EventService;
+  followUpService?: FollowUpService;
   frontendOrigin?: string;
   gatheringService?: GatheringService;
   lifeGroupService?: LifeGroupService;
@@ -65,6 +71,12 @@ const unavailableLifeGroupService: LifeGroupService = {
   listLeaderOptions: async () => unavailable(),
   setActive: async () => unavailable(),
   update: async () => unavailable(),
+};
+
+const unavailableFollowUpService: FollowUpService = {
+  complete: async () => unavailableFollowUp(),
+  list: async () => unavailableFollowUp(),
+  triggerSundayAbsence: async () => unavailableFollowUp(),
 };
 
 const unavailableGatheringService: GatheringService = {
@@ -116,6 +128,14 @@ function unavailableEvent(): never {
   throw new EventServiceError(500, "EVENT_SERVICE_UNAVAILABLE", "Sunday Service data is temporarily unavailable.");
 }
 
+function unavailableFollowUp(): never {
+  throw new FollowUpServiceError(
+    500,
+    "FOLLOW_UP_SERVICE_UNAVAILABLE",
+    "Follow Up data is temporarily unavailable.",
+  );
+}
+
 function unavailableMember(): never {
   throw new MemberServiceError(
     500,
@@ -151,6 +171,7 @@ function unavailableVisitor(): never {
 export function createApp({
   authService,
   eventService = unavailableEventService,
+  followUpService = unavailableFollowUpService,
   frontendOrigin = DEFAULT_FRONTEND_ORIGIN,
   gatheringService = unavailableGatheringService,
   lifeGroupService = unavailableLifeGroupService,
@@ -165,6 +186,7 @@ export function createApp({
   app.use("/api", healthRouter);
   app.use("/api", createMeRouter(authService));
   app.use("/api", createEventsRouter(authService, eventService));
+  app.use("/api", createFollowUpsRouter(authService, followUpService));
   app.use("/api", createLifeGroupsRouter(authService, lifeGroupService));
   app.use("/api", createGatheringsRouter(authService, gatheringService));
   app.use("/api", createMembersRouter(authService, memberService));

@@ -251,6 +251,31 @@ export interface VisitorConversionResult {
   visitor: Visitor
 }
 
+export type FollowUpReason =
+  | 'consecutive_sunday_absence'
+  | 'opencell_high_participation'
+  | 'harvest_sunday_interest'
+
+export type FollowUpStatus = 'active' | 'completed'
+
+export interface FollowUp {
+  completedAt: string | null
+  completedBy: { id: string; name: string } | null
+  completionNote: string | null
+  context: Record<string, unknown>
+  createdAt: string
+  id: string
+  reason: FollowUpReason
+  reasonLabel: string
+  status: FollowUpStatus
+  subject: {
+    id: string
+    name: string
+    recordStatus: 'active' | 'archived' | 'converted'
+    type: 'member' | 'visitor'
+  }
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -527,6 +552,30 @@ function isVisitorConversionResult(value: unknown): value is VisitorConversionRe
   return isRecord(value) && isMember(value.member) && isVisitor(value.visitor)
 }
 
+function isFollowUp(value: unknown): value is FollowUp {
+  return (
+    isRecord(value) &&
+    (typeof value.completedAt === 'string' || value.completedAt === null) &&
+    (value.completedBy === null || (
+      isRecord(value.completedBy) &&
+      typeof value.completedBy.id === 'string' &&
+      typeof value.completedBy.name === 'string'
+    )) &&
+    (typeof value.completionNote === 'string' || value.completionNote === null) &&
+    isRecord(value.context) &&
+    typeof value.createdAt === 'string' &&
+    typeof value.id === 'string' &&
+    ['consecutive_sunday_absence', 'opencell_high_participation', 'harvest_sunday_interest'].includes(String(value.reason)) &&
+    typeof value.reasonLabel === 'string' &&
+    (value.status === 'active' || value.status === 'completed') &&
+    isRecord(value.subject) &&
+    typeof value.subject.id === 'string' &&
+    typeof value.subject.name === 'string' &&
+    ['active', 'archived', 'converted'].includes(String(value.subject.recordStatus)) &&
+    (value.subject.type === 'member' || value.subject.type === 'visitor')
+  )
+}
+
 function readApiError(payload: unknown) {
   if (!isRecord(payload) || !isRecord(payload.error)) {
     return undefined
@@ -605,6 +654,9 @@ const isMinistryMemberList = (value: unknown): value is MinistryMember[] =>
 
 const isVisitorList = (value: unknown): value is Visitor[] =>
   Array.isArray(value) && value.every(isVisitor)
+
+const isFollowUpList = (value: unknown): value is FollowUp[] =>
+  Array.isArray(value) && value.every(isFollowUp)
 
 const isSundayServiceDirectory = (
   value: unknown,
@@ -965,6 +1017,30 @@ export function convertVisitor(
     `/visitors/${visitorId}/convert`,
     isVisitorConversionResult,
     { body: JSON.stringify({ lifeGroupId }), method: 'POST' },
+  )
+}
+
+export function getFollowUps(
+  accessToken: string,
+  status: FollowUpStatus = 'active',
+) {
+  return requestApi(
+    accessToken,
+    `/follow-ups?status=${status}`,
+    isFollowUpList,
+  )
+}
+
+export function completeFollowUp(
+  accessToken: string,
+  followUpId: string,
+  completionNote: string | null,
+) {
+  return requestApi(
+    accessToken,
+    `/follow-ups/${followUpId}/complete`,
+    isFollowUp,
+    { body: JSON.stringify({ completionNote }), method: 'PATCH' },
   )
 }
 

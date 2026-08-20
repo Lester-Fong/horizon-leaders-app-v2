@@ -428,9 +428,11 @@ p {
   }
 
   .horizon-table--events,
+  .horizon-table--follow-ups,
   .horizon-table--service-attendance,
   .horizon-table--service-visitors,
   .horizon-table--events tbody,
+  .horizon-table--follow-ups tbody,
   .horizon-table--service-attendance tbody,
   .horizon-table--service-visitors tbody {
     display: block;
@@ -438,12 +440,14 @@ p {
   }
 
   .horizon-table--events thead,
+  .horizon-table--follow-ups thead,
   .horizon-table--service-attendance thead,
   .horizon-table--service-visitors thead {
     display: none;
   }
 
   .horizon-table--events tbody tr,
+  .horizon-table--follow-ups tbody tr,
   .horizon-table--service-attendance tbody tr,
   .horizon-table--service-visitors tbody tr {
     display: grid;
@@ -454,6 +458,7 @@ p {
   }
 
   .horizon-table--events td,
+  .horizon-table--follow-ups td,
   .horizon-table--service-attendance td,
   .horizon-table--service-visitors td {
     display: block;
@@ -463,6 +468,10 @@ p {
   }
 
   .event-cell-primary,
+  .follow-up-cell-person,
+  .follow-up-cell-reason,
+  .follow-up-cell-triggered,
+  .follow-up-cell-status,
   .event-cell-date,
   .event-cell-counting,
   .event-cell-attendance,
@@ -479,6 +488,7 @@ p {
   }
 
   .event-cell-actions,
+  .follow-up-cell-actions,
   .attendance-cell-actions,
   .service-visitor-cell-actions {
     grid-column: 2;
@@ -502,6 +512,17 @@ p {
 @media (min-width: 768px) {
   .hm-table-mobile-label {
     display: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .horizon-table--follow-ups {
+    min-width: 0;
+  }
+
+  .horizon-table--follow-ups th,
+  .horizon-table--follow-ups td {
+    padding-inline: 0.65rem;
   }
 }
 

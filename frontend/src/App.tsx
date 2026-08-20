@@ -1,8 +1,4 @@
-import {
-  BookOpen,
-  HeartHandshake,
-  Users,
-} from 'lucide-react'
+import { BookOpen, Users } from 'lucide-react'
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
@@ -50,6 +46,10 @@ const EventsPage = lazy(() =>
 
 const SundayServicePage = lazy(() =>
   import('./pages/SundayServicePage').then((module) => ({ default: module.SundayServicePage })),
+)
+
+const FollowUpsPage = lazy(() =>
+  import('./pages/FollowUpsPage').then((module) => ({ default: module.FollowUpsPage })),
 )
 
 function App() {
@@ -151,11 +151,9 @@ function App() {
               <Route
                 path="follow-up"
                 element={
-                  <ModulePlaceholderPage
-                    title="Follow Up"
-                    description="Shared pastoral follow-up workflows will be implemented only in the Follow Up phase."
-                    icon={HeartHandshake}
-                  />
+                  <Suspense fallback={<LoadingState title="Loading Follow Up" description="Preparing the shared pastoral workflow." />}>
+                    <FollowUpsPage />
+                  </Suspense>
                 }
               />
               <Route

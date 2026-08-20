@@ -59,6 +59,67 @@ export type Database = {
           },
         ]
       }
+      follow_ups: {
+        Row: {
+          completed_at: string | null
+          completed_by_profile_id: string | null
+          completion_note: string | null
+          context: Json
+          created_at: string
+          id: string
+          member_id: string | null
+          reason: Database["public"]["Enums"]["follow_up_reason"]
+          status: Database["public"]["Enums"]["follow_up_status"]
+          visitor_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_by_profile_id?: string | null
+          completion_note?: string | null
+          context?: Json
+          created_at?: string
+          id?: string
+          member_id?: string | null
+          reason: Database["public"]["Enums"]["follow_up_reason"]
+          status?: Database["public"]["Enums"]["follow_up_status"]
+          visitor_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          completed_by_profile_id?: string | null
+          completion_note?: string | null
+          context?: Json
+          created_at?: string
+          id?: string
+          member_id?: string | null
+          reason?: Database["public"]["Enums"]["follow_up_reason"]
+          status?: Database["public"]["Enums"]["follow_up_status"]
+          visitor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follow_ups_completed_by_profile_id_fkey"
+            columns: ["completed_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_group_gathering_attendance: {
         Row: {
           gathering_id: string
@@ -499,6 +560,17 @@ export type Database = {
           outcome: string
         }[]
       }
+      complete_follow_up: {
+        Args: {
+          p_completed_by_profile_id: string
+          p_completion_note: string
+          p_follow_up_id: string
+        }
+        Returns: {
+          completed_at: string
+          outcome: string
+        }[]
+      }
       convert_visitor_to_member: {
         Args: {
           p_life_group_id: string
@@ -509,6 +581,18 @@ export type Database = {
           conflict_field: string
           conflicting_member_id: string
           created_member_id: string
+          outcome: string
+        }[]
+      }
+      create_follow_up_if_absent: {
+        Args: {
+          p_context: Json
+          p_member_id: string
+          p_reason: Database["public"]["Enums"]["follow_up_reason"]
+          p_visitor_id: string
+        }
+        Returns: {
+          follow_up_id: string
           outcome: string
         }[]
       }
@@ -537,6 +621,11 @@ export type Database = {
       app_role: "admin" | "leader"
       event_status: "open" | "closed"
       event_type: "service" | "harvest" | "other"
+      follow_up_reason:
+        | "consecutive_sunday_absence"
+        | "opencell_high_participation"
+        | "harvest_sunday_interest"
+      follow_up_status: "active" | "completed"
       member_gender: "male" | "female"
       visitor_status: "active" | "converted"
     }
@@ -669,6 +758,12 @@ export const Constants = {
       app_role: ["admin", "leader"],
       event_status: ["open", "closed"],
       event_type: ["service", "harvest", "other"],
+      follow_up_reason: [
+        "consecutive_sunday_absence",
+        "opencell_high_participation",
+        "harvest_sunday_interest",
+      ],
+      follow_up_status: ["active", "completed"],
       member_gender: ["male", "female"],
       visitor_status: ["active", "converted"],
     },
