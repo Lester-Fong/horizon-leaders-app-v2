@@ -111,6 +111,95 @@ export interface MinistryListFilters {
   status?: MinistryListStatus
 }
 
+export interface GatheringLifeGroup {
+  id: string
+  isActive: boolean
+  name: string
+}
+
+export interface GatheringCreator {
+  id: string
+  name: string
+}
+
+export interface LifeGroupGathering {
+  attendanceCount: number
+  createdAt: string
+  createdBy: GatheringCreator
+  gatheringDate: string
+  id: string
+  lifeGroup: GatheringLifeGroup
+  location: string | null
+  notes: string | null
+  title: string | null
+  updatedAt: string
+}
+
+export interface GatheringDirectory {
+  gatherings: LifeGroupGathering[]
+  lifeGroup: GatheringLifeGroup
+}
+
+export interface GatheringInput {
+  gatheringDate: string
+  location: string | null
+  notes: string | null
+  title: string | null
+}
+
+export interface GatheringAttendanceMember {
+  currentLifeGroup: { id: string; name: string }
+  email: string | null
+  firstName: string
+  id: string
+  isActive: boolean
+  isEligible: boolean
+  isPresent: boolean
+  lastName: string
+  phone: string | null
+}
+
+export interface GatheringAttendanceRoster {
+  members: GatheringAttendanceMember[]
+}
+
+export interface AttendanceMutationResult {
+  isPresent: boolean
+  memberId: string
+}
+
+export type VisitorStatus = 'active' | 'converted'
+export type VisitorListStatus = VisitorStatus | 'all'
+
+export interface Visitor {
+  convertedMemberId: string | null
+  createdAt: string
+  email: string | null
+  firstName: string
+  id: string
+  lastName: string
+  phone: string | null
+  status: VisitorStatus
+  updatedAt: string
+}
+
+export interface VisitorInput {
+  email: string | null
+  firstName: string
+  lastName: string
+  phone: string | null
+}
+
+export interface VisitorListFilters {
+  search?: string
+  status?: VisitorListStatus
+}
+
+export interface VisitorConversionResult {
+  member: Member
+  visitor: Visitor
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -229,6 +318,106 @@ function isMinistryMember(value: unknown): value is MinistryMember {
   )
 }
 
+function isGatheringLifeGroup(value: unknown): value is GatheringLifeGroup {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.name === 'string'
+  )
+}
+
+function isGatheringCreator(value: unknown): value is GatheringCreator {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string'
+  )
+}
+
+function isLifeGroupGathering(value: unknown): value is LifeGroupGathering {
+  return (
+    isRecord(value) &&
+    typeof value.attendanceCount === 'number' &&
+    typeof value.createdAt === 'string' &&
+    isGatheringCreator(value.createdBy) &&
+    typeof value.gatheringDate === 'string' &&
+    typeof value.id === 'string' &&
+    isGatheringLifeGroup(value.lifeGroup) &&
+    (typeof value.location === 'string' || value.location === null) &&
+    (typeof value.notes === 'string' || value.notes === null) &&
+    (typeof value.title === 'string' || value.title === null) &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+function isGatheringDirectory(value: unknown): value is GatheringDirectory {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.gatherings) &&
+    value.gatherings.every(isLifeGroupGathering) &&
+    isGatheringLifeGroup(value.lifeGroup)
+  )
+}
+
+function isGatheringAttendanceMember(
+  value: unknown,
+): value is GatheringAttendanceMember {
+  return (
+    isRecord(value) &&
+    isRecord(value.currentLifeGroup) &&
+    typeof value.currentLifeGroup.id === 'string' &&
+    typeof value.currentLifeGroup.name === 'string' &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.isEligible === 'boolean' &&
+    typeof value.isPresent === 'boolean' &&
+    typeof value.lastName === 'string' &&
+    (typeof value.phone === 'string' || value.phone === null)
+  )
+}
+
+function isGatheringAttendanceRoster(
+  value: unknown,
+): value is GatheringAttendanceRoster {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.members) &&
+    value.members.every(isGatheringAttendanceMember)
+  )
+}
+
+function isAttendanceMutationResult(
+  value: unknown,
+): value is AttendanceMutationResult {
+  return (
+    isRecord(value) &&
+    typeof value.isPresent === 'boolean' &&
+    typeof value.memberId === 'string'
+  )
+}
+
+function isVisitor(value: unknown): value is Visitor {
+  return (
+    isRecord(value) &&
+    (typeof value.convertedMemberId === 'string' || value.convertedMemberId === null) &&
+    typeof value.createdAt === 'string' &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.lastName === 'string' &&
+    (typeof value.phone === 'string' || value.phone === null) &&
+    (value.status === 'active' || value.status === 'converted') &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+function isVisitorConversionResult(value: unknown): value is VisitorConversionResult {
+  return isRecord(value) && isMember(value.member) && isVisitor(value.visitor)
+}
+
 function readApiError(payload: unknown) {
   if (!isRecord(payload) || !isRecord(payload.error)) {
     return undefined
@@ -303,6 +492,9 @@ const isMinistryList = (value: unknown): value is Ministry[] =>
 
 const isMinistryMemberList = (value: unknown): value is MinistryMember[] =>
   Array.isArray(value) && value.every(isMinistryMember)
+
+const isVisitorList = (value: unknown): value is Visitor[] =>
+  Array.isArray(value) && value.every(isVisitor)
 
 export function getLifeGroups(accessToken: string) {
   return requestApi(accessToken, '/life-groups', isLifeGroupList)
@@ -434,6 +626,139 @@ export function removeMemberFromMinistry(
     `/ministries/${ministryId}/members/${memberId}`,
     isMinistryMember,
     { method: 'DELETE' },
+  )
+}
+
+export function getGatherings(accessToken: string, lifeGroupId: string) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings`,
+    isGatheringDirectory,
+  )
+}
+
+export function getGathering(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}`,
+    isLifeGroupGathering,
+  )
+}
+
+export function createGathering(
+  accessToken: string,
+  lifeGroupId: string,
+  input: GatheringInput,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings`,
+    isLifeGroupGathering,
+    { body: JSON.stringify(input), method: 'POST' },
+  )
+}
+
+export function updateGathering(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+  input: GatheringInput,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}`,
+    isLifeGroupGathering,
+    { body: JSON.stringify(input), method: 'PATCH' },
+  )
+}
+
+export function getGatheringAttendance(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}/attendance`,
+    isGatheringAttendanceRoster,
+  )
+}
+
+export function markGatheringAttendance(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+  memberId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}/attendance`,
+    isAttendanceMutationResult,
+    { body: JSON.stringify({ memberId }), method: 'POST' },
+  )
+}
+
+export function removeGatheringAttendance(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+  memberId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}/attendance/${memberId}`,
+    isAttendanceMutationResult,
+    { method: 'DELETE' },
+  )
+}
+
+export function getVisitors(
+  accessToken: string,
+  filters: VisitorListFilters = {},
+) {
+  const searchParameters = new URLSearchParams()
+  if (filters.search) searchParameters.set('search', filters.search)
+  if (filters.status) searchParameters.set('status', filters.status)
+  const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
+  return requestApi(accessToken, `/visitors${query}`, isVisitorList)
+}
+
+export function getVisitor(accessToken: string, visitorId: string) {
+  return requestApi(accessToken, `/visitors/${visitorId}`, isVisitor)
+}
+
+export function createVisitor(accessToken: string, input: VisitorInput) {
+  return requestApi(accessToken, '/visitors', isVisitor, {
+    body: JSON.stringify(input),
+    method: 'POST',
+  })
+}
+
+export function updateVisitor(
+  accessToken: string,
+  visitorId: string,
+  input: VisitorInput,
+) {
+  return requestApi(accessToken, `/visitors/${visitorId}`, isVisitor, {
+    body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+export function convertVisitor(
+  accessToken: string,
+  visitorId: string,
+  lifeGroupId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/visitors/${visitorId}/convert`,
+    isVisitorConversionResult,
+    { body: JSON.stringify({ lifeGroupId }), method: 'POST' },
   )
 }
 

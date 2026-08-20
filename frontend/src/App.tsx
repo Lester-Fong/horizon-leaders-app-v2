@@ -2,7 +2,6 @@ import {
   BookOpen,
   CalendarDays,
   HeartHandshake,
-  UserPlus,
   Users,
 } from 'lucide-react'
 import { lazy, Suspense } from 'react'
@@ -31,6 +30,18 @@ const MembersPage = lazy(() =>
 const MinistriesPage = lazy(() =>
   import('./pages/MinistriesPage').then((module) => ({
     default: module.MinistriesPage,
+  })),
+)
+
+const GatheringsPage = lazy(() =>
+  import('./pages/GatheringsPage').then((module) => ({
+    default: module.GatheringsPage,
+  })),
+)
+
+const VisitorsPage = lazy(() =>
+  import('./pages/VisitorsPage').then((module) => ({
+    default: module.VisitorsPage,
   })),
 )
 
@@ -85,6 +96,21 @@ function App() {
                 element={<LifeGroupsPage />}
               />
               <Route
+                path="life-groups/:lifeGroupId/gatherings"
+                element={
+                  <Suspense
+                    fallback={
+                      <LoadingState
+                        title="Loading Gatherings"
+                        description="Preparing this Life Group's meeting history."
+                      />
+                    }
+                  >
+                    <GatheringsPage />
+                  </Suspense>
+                }
+              />
+              <Route
                 path="events"
                 element={
                   <ModulePlaceholderPage
@@ -97,11 +123,16 @@ function App() {
               <Route
                 path="visitors"
                 element={
-                  <ModulePlaceholderPage
-                    title="Visitors"
-                    description="Visitor records and conversion workflows remain in their approved future phase."
-                    icon={UserPlus}
-                  />
+                  <Suspense
+                    fallback={
+                      <LoadingState
+                        title="Loading Visitors"
+                        description="Preparing the Visitor directory."
+                      />
+                    }
+                  >
+                    <VisitorsPage />
+                  </Suspense>
                 }
               />
               <Route

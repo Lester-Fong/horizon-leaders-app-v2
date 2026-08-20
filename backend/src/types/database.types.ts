@@ -9,6 +9,87 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      life_group_gathering_attendance: {
+        Row: {
+          gathering_id: string
+          member_id: string
+        }
+        Insert: {
+          gathering_id: string
+          member_id: string
+        }
+        Update: {
+          gathering_id?: string
+          member_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_group_gathering_attendance_gathering_id_fkey"
+            columns: ["gathering_id"]
+            isOneToOne: false
+            referencedRelation: "life_group_gatherings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "life_group_gathering_attendance_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      life_group_gatherings: {
+        Row: {
+          created_at: string
+          created_by_profile_id: string
+          gathering_date: string
+          id: string
+          life_group_id: string
+          location: string | null
+          notes: string | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_profile_id: string
+          gathering_date: string
+          id?: string
+          life_group_id: string
+          location?: string | null
+          notes?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by_profile_id?: string
+          gathering_date?: string
+          id?: string
+          life_group_id?: string
+          location?: string | null
+          notes?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_group_gatherings_created_by_profile_id_fkey"
+            columns: ["created_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "life_group_gatherings_life_group_id_fkey"
+            columns: ["life_group_id"]
+            isOneToOne: false
+            referencedRelation: "life_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_groups: {
         Row: {
           created_at: string
@@ -193,17 +274,81 @@ export type Database = {
         }
         Relationships: []
       }
+      visitors: {
+        Row: {
+          converted_member_id: string | null
+          created_at: string
+          email: string | null
+          first_name: string
+          id: string
+          last_name: string
+          normalized_email: string | null
+          normalized_phone: string | null
+          phone: string | null
+          status: Database["public"]["Enums"]["visitor_status"]
+          updated_at: string
+        }
+        Insert: {
+          converted_member_id?: string | null
+          created_at?: string
+          email?: string | null
+          first_name: string
+          id?: string
+          last_name: string
+          normalized_email?: string | null
+          normalized_phone?: string | null
+          phone?: string | null
+          status?: Database["public"]["Enums"]["visitor_status"]
+          updated_at?: string
+        }
+        Update: {
+          converted_member_id?: string | null
+          created_at?: string
+          email?: string | null
+          first_name?: string
+          id?: string
+          last_name?: string
+          normalized_email?: string | null
+          normalized_phone?: string | null
+          phone?: string | null
+          status?: Database["public"]["Enums"]["visitor_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visitors_converted_member_id_fkey"
+            columns: ["converted_member_id"]
+            isOneToOne: true
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      convert_visitor_to_member: {
+        Args: {
+          p_life_group_id: string
+          p_qr_token: string
+          p_visitor_id: string
+        }
+        Returns: {
+          conflict_field: string
+          conflicting_member_id: string
+          created_member_id: string
+          outcome: string
+        }[]
+      }
       normalize_member_email: { Args: { value: string }; Returns: string }
       normalize_member_phone: { Args: { value: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "leader"
       member_gender: "male" | "female"
+      visitor_status: "active" | "converted"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -333,6 +478,7 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "leader"],
       member_gender: ["male", "female"],
+      visitor_status: ["active", "converted"],
     },
   },
 } as const

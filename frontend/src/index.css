@@ -292,6 +292,51 @@ p {
     align-self: end;
   }
 
+  .horizon-table--visitors {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--visitors thead {
+    display: none;
+  }
+
+  .horizon-table--visitors tbody {
+    display: block;
+  }
+
+  .horizon-table--visitors tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    border-bottom: 1px solid var(--color-line);
+    padding: 0.875rem 0;
+  }
+
+  .horizon-table--visitors tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .horizon-table--visitors td {
+    display: block;
+    border: 0;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .horizon-table--visitors .visitor-cell-primary,
+  .horizon-table--visitors .visitor-cell-contact {
+    grid-column: 1;
+  }
+
+  .horizon-table--visitors .visitor-cell-status {
+    grid-column: 1;
+  }
+
+  .horizon-table--visitors .visitor-cell-actions {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
   .horizon-table--ministries {
     display: block;
     min-width: 0;
@@ -332,6 +377,51 @@ p {
   }
 
   .horizon-table--ministries .ministry-cell-actions {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .horizon-table--gatherings {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--gatherings thead {
+    display: none;
+  }
+
+  .horizon-table--gatherings tbody {
+    display: block;
+  }
+
+  .horizon-table--gatherings tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--hm-gray-200);
+  }
+
+  .horizon-table--gatherings tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .horizon-table--gatherings td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .horizon-table--gatherings .gathering-cell-date,
+  .horizon-table--gatherings .gathering-cell-title,
+  .horizon-table--gatherings .gathering-cell-location,
+  .horizon-table--gatherings .gathering-cell-attendance {
+    grid-column: 1;
+  }
+
+  .horizon-table--gatherings .gathering-cell-actions {
     grid-column: 2;
     grid-row: 1;
     align-self: center;

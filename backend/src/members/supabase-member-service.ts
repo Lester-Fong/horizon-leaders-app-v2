@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
@@ -15,6 +13,11 @@ import {
   type MemberService,
   type ListMembersOptions,
 } from "./types.js";
+import {
+  generateMemberQrToken,
+  isMemberQrTokenCollision,
+  MEMBER_QR_TOKEN_COLLISION_RETRIES,
+} from "./member-qr-token.js";
 
 interface SupabaseMemberServiceConfig {
   generateQrToken?: () => string;
@@ -31,12 +34,6 @@ type MemberRow = Omit<Tables<"members">, "normalized_email" | "normalized_phone"
 const MEMBER_COLUMNS =
   "id, first_name, last_name, phone, email, address, birth_date, gender, life_group_id, qr_token, is_active, created_at, updated_at";
 const LIFE_GROUP_COLUMNS = "id, name, is_active, leader_profile_id";
-const QR_TOKEN_COLLISION_RETRIES = 3;
-
-function defaultGenerateQrToken() {
-  return randomBytes(32).toString("base64url");
-}
-
 function serviceUnavailable() {
   return new MemberServiceError(
     500,
@@ -100,7 +97,7 @@ function mapMember(member: MemberRow, lifeGroup: LifeGroupRow): Member {
 }
 
 export function createSupabaseMemberService({
-  generateQrToken = defaultGenerateQrToken,
+  generateQrToken = generateMemberQrToken,
   serviceRoleKey,
   supabaseUrl,
 }: SupabaseMemberServiceConfig): MemberService {
@@ -293,7 +290,11 @@ export function createSupabaseMemberService({
     async create(actor, input) {
       await validateNewAssignment(actor, input.lifeGroupId);
 
-      for (let attempt = 0; attempt < QR_TOKEN_COLLISION_RETRIES; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < MEMBER_QR_TOKEN_COLLISION_RETRIES;
+        attempt += 1
+      ) {
         const insert: TablesInsert<"members"> = {
           address: input.address,
           birth_date: input.birthDate,
@@ -313,7 +314,7 @@ export function createSupabaseMemberService({
 
         if (!error) return hydrateMember(data);
 
-        if (isConstraintError(error, "members_qr_token_key")) {
+        if (isMemberQrTokenCollision(error)) {
           continue;
         }
 

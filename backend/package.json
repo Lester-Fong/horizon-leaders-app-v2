@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
-    "test:integration": "vitest run --maxWorkers=1 src/auth/auth.integration.test.ts src/life-groups/life-groups.integration.test.ts src/members/members.integration.test.ts src/ministries/ministries.integration.test.ts",
+    "test:integration": "vitest run --maxWorkers=1 src/auth/auth.integration.test.ts src/life-groups/life-groups.integration.test.ts src/members/members.integration.test.ts src/ministries/ministries.integration.test.ts src/gatherings/gatherings.integration.test.ts src/visitors/visitors.integration.test.ts",
     "lint": "eslint . --max-warnings 0"
   },
   "dependencies": {

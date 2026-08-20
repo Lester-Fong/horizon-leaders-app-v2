@@ -1,12 +1,14 @@
 import {
   Archive,
   ArchiveRestore,
+  CalendarDays,
   Pencil,
   Plus,
   RefreshCw,
   Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import { Button } from '../components/ui/Button'
@@ -65,6 +67,7 @@ async function getAccessToken() {
 }
 
 export function LifeGroupsPage() {
+  const navigate = useNavigate()
   const { actor } = useAuth()
   const isAdmin = actor?.role === 'admin'
   const [groups, setGroups] = useState<LifeGroup[]>([])
@@ -222,7 +225,16 @@ export function LifeGroupsPage() {
   }
 
   function getRowActions(group: LifeGroup): RowAction[] {
+    const actions: RowAction[] = [
+      {
+        icon: CalendarDays,
+        label: 'View Gatherings',
+        onSelect: () => navigate(`/life-groups/${group.id}/gatherings`),
+      },
+    ]
+    if (!isAdmin) return actions
     return [
+      ...actions,
       {
         icon: Pencil,
         label: 'Edit Life Group',
@@ -310,11 +322,9 @@ export function LifeGroupsPage() {
               <th scope="col">Life Group</th>
               <th scope="col">Leader</th>
               <th scope="col">Status</th>
-              {isAdmin && (
-                <th scope="col" className="w-16">
-                  <span className="sr-only">Actions</span>
-                </th>
-              )}
+              <th scope="col" className="w-16">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -344,15 +354,13 @@ export function LifeGroupsPage() {
                     {group.isActive ? 'Active' : 'Archived'}
                   </StatusBadge>
                 </td>
-                {isAdmin && (
-                  <td className="life-group-cell-actions text-right">
-                    <RowActionsMenu
-                      label={`Actions for ${group.name}`}
-                      actions={getRowActions(group)}
-                      disabled={changingGroupId === group.id}
-                    />
-                  </td>
-                )}
+                <td className="life-group-cell-actions text-right">
+                  <RowActionsMenu
+                    label={`Actions for ${group.name}`}
+                    actions={getRowActions(group)}
+                    disabled={changingGroupId === group.id}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

@@ -3,6 +3,10 @@ import express from "express";
 
 import type { AuthService } from "./auth/types.js";
 import {
+  GatheringServiceError,
+  type GatheringService,
+} from "./gatherings/types.js";
+import {
   LifeGroupServiceError,
   type LifeGroupService,
 } from "./life-groups/types.js";
@@ -12,17 +16,25 @@ import {
   type MinistryService,
 } from "./ministries/types.js";
 import { healthRouter } from "./routes/health.js";
+import { createGatheringsRouter } from "./routes/gatherings.js";
 import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
 import { createMembersRouter } from "./routes/members.js";
 import { createMinistriesRouter } from "./routes/ministries.js";
+import { createVisitorsRouter } from "./routes/visitors.js";
+import {
+  VisitorServiceError,
+  type VisitorService,
+} from "./visitors/types.js";
 
 export interface AppDependencies {
   authService: AuthService;
   frontendOrigin?: string;
+  gatheringService?: GatheringService;
   lifeGroupService?: LifeGroupService;
   memberService?: MemberService;
   ministryService?: MinistryService;
+  visitorService?: VisitorService;
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
@@ -34,6 +46,16 @@ const unavailableLifeGroupService: LifeGroupService = {
   listLeaderOptions: async () => unavailable(),
   setActive: async () => unavailable(),
   update: async () => unavailable(),
+};
+
+const unavailableGatheringService: GatheringService = {
+  addAttendance: async () => unavailableGathering(),
+  create: async () => unavailableGathering(),
+  getAttendance: async () => unavailableGathering(),
+  getById: async () => unavailableGathering(),
+  list: async () => unavailableGathering(),
+  removeAttendance: async () => unavailableGathering(),
+  update: async () => unavailableGathering(),
 };
 
 const unavailableMemberService: MemberService = {
@@ -55,6 +77,14 @@ const unavailableMinistryService: MinistryService = {
   update: async () => unavailableMinistry(),
 };
 
+const unavailableVisitorService: VisitorService = {
+  convert: async () => unavailableVisitor(),
+  create: async () => unavailableVisitor(),
+  getById: async () => unavailableVisitor(),
+  list: async () => unavailableVisitor(),
+  update: async () => unavailableVisitor(),
+};
+
 function unavailable(): never {
   throw new LifeGroupServiceError(
     500,
@@ -71,6 +101,14 @@ function unavailableMember(): never {
   );
 }
 
+function unavailableGathering(): never {
+  throw new GatheringServiceError(
+    500,
+    "GATHERING_SERVICE_UNAVAILABLE",
+    "Gathering data is temporarily unavailable.",
+  );
+}
+
 function unavailableMinistry(): never {
   throw new MinistryServiceError(
     500,
@@ -79,12 +117,22 @@ function unavailableMinistry(): never {
   );
 }
 
+function unavailableVisitor(): never {
+  throw new VisitorServiceError(
+    500,
+    "VISITOR_SERVICE_UNAVAILABLE",
+    "Visitor data is temporarily unavailable.",
+  );
+}
+
 export function createApp({
   authService,
   frontendOrigin = DEFAULT_FRONTEND_ORIGIN,
+  gatheringService = unavailableGatheringService,
   lifeGroupService = unavailableLifeGroupService,
   memberService = unavailableMemberService,
   ministryService = unavailableMinistryService,
+  visitorService = unavailableVisitorService,
 }: AppDependencies) {
   const app = express();
 
@@ -93,8 +141,10 @@ export function createApp({
   app.use("/api", healthRouter);
   app.use("/api", createMeRouter(authService));
   app.use("/api", createLifeGroupsRouter(authService, lifeGroupService));
+  app.use("/api", createGatheringsRouter(authService, gatheringService));
   app.use("/api", createMembersRouter(authService, memberService));
   app.use("/api", createMinistriesRouter(authService, ministryService));
+  app.use("/api", createVisitorsRouter(authService, visitorService));
 
   return app;
 }
