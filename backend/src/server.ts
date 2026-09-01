@@ -4,6 +4,7 @@ import { config } from "./config/environment.js";
 import { createSupabaseEventService } from "./events/supabase-event-service.js";
 import { createSupabaseFollowUpService } from "./follow-ups/supabase-follow-up-service.js";
 import { createSupabaseGatheringService } from "./gatherings/supabase-gathering-service.js";
+import { createSupabaseHarvestService } from "./harvests/supabase-harvest-service.js";
 import { createSupabaseLifeGroupService } from "./life-groups/supabase-life-group-service.js";
 import { createSupabaseMemberService } from "./members/supabase-member-service.js";
 import { createSupabaseMinistryService } from "./ministries/supabase-ministry-service.js";
@@ -33,6 +34,11 @@ const memberService = createSupabaseMemberService({
   serviceRoleKey: config.supabaseServiceRoleKey,
   supabaseUrl: config.supabaseUrl,
 });
+const harvestService = createSupabaseHarvestService({
+  memberService,
+  serviceRoleKey: config.supabaseServiceRoleKey,
+  supabaseUrl: config.supabaseUrl,
+});
 const ministryService = createSupabaseMinistryService({
   memberService,
   serviceRoleKey: config.supabaseServiceRoleKey,
@@ -50,6 +56,7 @@ const app = createApp({
   followUpService,
   frontendOrigin: config.frontendOrigin,
   gatheringService,
+  harvestService,
   lifeGroupService,
   memberService,
   ministryService,

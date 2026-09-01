@@ -431,10 +431,12 @@ p {
   .horizon-table--follow-ups,
   .horizon-table--service-attendance,
   .horizon-table--service-visitors,
+  .horizon-table--harvest-participation,
   .horizon-table--events tbody,
   .horizon-table--follow-ups tbody,
   .horizon-table--service-attendance tbody,
-  .horizon-table--service-visitors tbody {
+  .horizon-table--service-visitors tbody,
+  .horizon-table--harvest-participation tbody {
     display: block;
     min-width: 0;
   }
@@ -442,14 +444,16 @@ p {
   .horizon-table--events thead,
   .horizon-table--follow-ups thead,
   .horizon-table--service-attendance thead,
-  .horizon-table--service-visitors thead {
+  .horizon-table--service-visitors thead,
+  .horizon-table--harvest-participation thead {
     display: none;
   }
 
   .horizon-table--events tbody tr,
   .horizon-table--follow-ups tbody tr,
   .horizon-table--service-attendance tbody tr,
-  .horizon-table--service-visitors tbody tr {
+  .horizon-table--service-visitors tbody tr,
+  .horizon-table--harvest-participation tbody tr {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.7rem 1rem;
@@ -460,7 +464,8 @@ p {
   .horizon-table--events td,
   .horizon-table--follow-ups td,
   .horizon-table--service-attendance td,
-  .horizon-table--service-visitors td {
+  .horizon-table--service-visitors td,
+  .horizon-table--harvest-participation td {
     display: block;
     min-width: 0;
     padding: 0;
@@ -483,14 +488,20 @@ p {
   .service-visitor-cell-primary,
   .service-visitor-cell-contact,
   .service-visitor-cell-status,
-  .service-visitor-cell-actor {
+  .service-visitor-cell-actor,
+  .harvest-cell-primary,
+  .harvest-cell-contact,
+  .harvest-cell-record,
+  .harvest-cell-interest,
+  .harvest-cell-follow-up {
     grid-column: 1;
   }
 
   .event-cell-actions,
   .follow-up-cell-actions,
   .attendance-cell-actions,
-  .service-visitor-cell-actions {
+  .service-visitor-cell-actions,
+  .harvest-cell-actions {
     grid-column: 2;
     grid-row: 1;
     align-self: start;

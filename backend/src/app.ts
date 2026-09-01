@@ -11,6 +11,7 @@ import {
   GatheringServiceError,
   type GatheringService,
 } from "./gatherings/types.js";
+import { HarvestServiceError, type HarvestService } from "./harvests/types.js";
 import {
   LifeGroupServiceError,
   type LifeGroupService,
@@ -24,6 +25,7 @@ import { healthRouter } from "./routes/health.js";
 import { createEventsRouter } from "./routes/events.js";
 import { createFollowUpsRouter } from "./routes/follow-ups.js";
 import { createGatheringsRouter } from "./routes/gatherings.js";
+import { createHarvestsRouter } from "./routes/harvests.js";
 import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
 import { createMembersRouter } from "./routes/members.js";
@@ -40,6 +42,7 @@ export interface AppDependencies {
   followUpService?: FollowUpService;
   frontendOrigin?: string;
   gatheringService?: GatheringService;
+  harvestService?: HarvestService;
   lifeGroupService?: LifeGroupService;
   memberService?: MemberService;
   ministryService?: MinistryService;
@@ -87,6 +90,18 @@ const unavailableGatheringService: GatheringService = {
   list: async () => unavailableGathering(),
   removeAttendance: async () => unavailableGathering(),
   update: async () => unavailableGathering(),
+};
+
+const unavailableHarvestService: HarvestService = {
+  close: async () => unavailableHarvest(),
+  create: async () => unavailableHarvest(),
+  getById: async () => unavailableHarvest(),
+  list: async () => unavailableHarvest(),
+  listParticipations: async () => unavailableHarvest(),
+  recordInterest: async () => unavailableHarvest(),
+  registerExistingVisitor: async () => unavailableHarvest(),
+  registerNewVisitor: async () => unavailableHarvest(),
+  update: async () => unavailableHarvest(),
 };
 
 const unavailableMemberService: MemberService = {
@@ -152,6 +167,14 @@ function unavailableGathering(): never {
   );
 }
 
+function unavailableHarvest(): never {
+  throw new HarvestServiceError(
+    500,
+    "HARVEST_SERVICE_UNAVAILABLE",
+    "Harvest data is temporarily unavailable.",
+  );
+}
+
 function unavailableMinistry(): never {
   throw new MinistryServiceError(
     500,
@@ -174,6 +197,7 @@ export function createApp({
   followUpService = unavailableFollowUpService,
   frontendOrigin = DEFAULT_FRONTEND_ORIGIN,
   gatheringService = unavailableGatheringService,
+  harvestService = unavailableHarvestService,
   lifeGroupService = unavailableLifeGroupService,
   memberService = unavailableMemberService,
   ministryService = unavailableMinistryService,
@@ -185,6 +209,7 @@ export function createApp({
   app.use(express.json());
   app.use("/api", healthRouter);
   app.use("/api", createMeRouter(authService));
+  app.use("/api", createHarvestsRouter(authService, harvestService));
   app.use("/api", createEventsRouter(authService, eventService));
   app.use("/api", createFollowUpsRouter(authService, followUpService));
   app.use("/api", createLifeGroupsRouter(authService, lifeGroupService));

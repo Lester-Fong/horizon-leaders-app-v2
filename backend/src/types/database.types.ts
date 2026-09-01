@@ -120,6 +120,65 @@ export type Database = {
           },
         ]
       }
+      harvest_participations: {
+        Row: {
+          created_at: string
+          event_id: string
+          interest_recorded_at: string | null
+          interest_recorded_by_profile_id: string | null
+          registered_by_profile_id: string
+          sunday_interest: boolean | null
+          visitor_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          interest_recorded_at?: string | null
+          interest_recorded_by_profile_id?: string | null
+          registered_by_profile_id: string
+          sunday_interest?: boolean | null
+          visitor_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          interest_recorded_at?: string | null
+          interest_recorded_by_profile_id?: string | null
+          registered_by_profile_id?: string
+          sunday_interest?: boolean | null
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "harvest_participations_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "harvest_participations_interest_recorded_by_profile_id_fkey"
+            columns: ["interest_recorded_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "harvest_participations_registered_by_profile_id_fkey"
+            columns: ["registered_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "harvest_participations_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_group_gathering_attendance: {
         Row: {
           gathering_id: string
@@ -596,6 +655,24 @@ export type Database = {
           outcome: string
         }[]
       }
+      create_harvest_visitor_registration: {
+        Args: {
+          p_email: string
+          p_event_id: string
+          p_first_name: string
+          p_last_name: string
+          p_phone: string
+          p_registered_by_profile_id: string
+        }
+        Returns: {
+          conflict_field: string
+          conflicting_member_id: string
+          conflicting_visitor_id: string
+          conflicting_visitor_status: Database["public"]["Enums"]["visitor_status"]
+          created_visitor_id: string
+          outcome: string
+        }[]
+      }
       create_sunday_visitor_registration: {
         Args: {
           p_email: string
@@ -616,6 +693,19 @@ export type Database = {
       }
       normalize_member_email: { Args: { value: string }; Returns: string }
       normalize_member_phone: { Args: { value: string }; Returns: string }
+      record_harvest_sunday_interest: {
+        Args: {
+          p_event_id: string
+          p_interested: boolean
+          p_recorded_by_profile_id: string
+          p_visitor_id: string
+        }
+        Returns: {
+          follow_up_id: string
+          follow_up_outcome: string
+          outcome: string
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "leader"

@@ -219,6 +219,51 @@ export interface SundayVisitorRegistration {
   }
 }
 
+export interface HarvestEvent {
+  countsForAbsence: false
+  createdAt: string
+  createdBy: { id: string; name: string }
+  description: string | null
+  eventDate: string
+  id: string
+  location: string | null
+  participationCount: number
+  status: SundayServiceStatus
+  title: string
+  type: 'harvest'
+  updatedAt: string
+}
+
+export interface HarvestEventInput {
+  description: string | null
+  eventDate: string
+  location: string | null
+  title: string
+}
+
+export interface HarvestParticipation {
+  createdAt: string
+  followUp: { createdAt: string; id: string; status: FollowUpStatus } | null
+  interestRecordedAt: string | null
+  interestRecordedBy: { id: string; name: string } | null
+  registeredBy: { id: string; name: string }
+  sundayInterest: boolean | null
+  visitor: {
+    email: string | null
+    firstName: string
+    id: string
+    lastName: string
+    phone: string | null
+    status: VisitorStatus
+  }
+}
+
+export interface HarvestInterestResult {
+  followUpId: string | null
+  followUpResult: 'created' | 'suppressed' | null
+  result: 'recorded_interested' | 'recorded_not_interested' | 'already_interested' | 'already_not_interested'
+}
+
 export type VisitorStatus = 'active' | 'converted'
 export type VisitorListStatus = VisitorStatus | 'all'
 
@@ -533,6 +578,56 @@ function isSundayVisitorRegistration(value: unknown): value is SundayVisitorRegi
   )
 }
 
+function isHarvestEvent(value: unknown): value is HarvestEvent {
+  return (
+    isRecord(value) &&
+    value.countsForAbsence === false &&
+    typeof value.createdAt === 'string' &&
+    isRecord(value.createdBy) &&
+    typeof value.createdBy.id === 'string' &&
+    typeof value.createdBy.name === 'string' &&
+    (typeof value.description === 'string' || value.description === null) &&
+    typeof value.eventDate === 'string' &&
+    typeof value.id === 'string' &&
+    (typeof value.location === 'string' || value.location === null) &&
+    typeof value.participationCount === 'number' &&
+    (value.status === 'open' || value.status === 'closed') &&
+    typeof value.title === 'string' &&
+    value.type === 'harvest' &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+function isHarvestParticipation(value: unknown): value is HarvestParticipation {
+  return (
+    isRecord(value) &&
+    typeof value.createdAt === 'string' &&
+    (value.followUp === null || (
+      isRecord(value.followUp) &&
+      typeof value.followUp.createdAt === 'string' &&
+      typeof value.followUp.id === 'string' &&
+      (value.followUp.status === 'active' || value.followUp.status === 'completed')
+    )) &&
+    (typeof value.interestRecordedAt === 'string' || value.interestRecordedAt === null) &&
+    (value.interestRecordedBy === null || (
+      isRecord(value.interestRecordedBy) &&
+      typeof value.interestRecordedBy.id === 'string' &&
+      typeof value.interestRecordedBy.name === 'string'
+    )) &&
+    isRecord(value.registeredBy) &&
+    typeof value.registeredBy.id === 'string' &&
+    typeof value.registeredBy.name === 'string' &&
+    (typeof value.sundayInterest === 'boolean' || value.sundayInterest === null) &&
+    isRecord(value.visitor) &&
+    typeof value.visitor.id === 'string' &&
+    typeof value.visitor.firstName === 'string' &&
+    typeof value.visitor.lastName === 'string' &&
+    (typeof value.visitor.phone === 'string' || value.visitor.phone === null) &&
+    (typeof value.visitor.email === 'string' || value.visitor.email === null) &&
+    (value.visitor.status === 'active' || value.visitor.status === 'converted')
+  )
+}
+
 function isVisitor(value: unknown): value is Visitor {
   return (
     isRecord(value) &&
@@ -662,6 +757,22 @@ const isSundayServiceDirectory = (
   value: unknown,
 ): value is { events: SundayService[] } =>
   isRecord(value) && Array.isArray(value.events) && value.events.every(isSundayService)
+
+const isHarvestDirectory = (
+  value: unknown,
+): value is { events: HarvestEvent[] } =>
+  isRecord(value) && Array.isArray(value.events) && value.events.every(isHarvestEvent)
+
+const isHarvestParticipationRoster = (
+  value: unknown,
+): value is { participations: HarvestParticipation[] } =>
+  isRecord(value) && Array.isArray(value.participations) && value.participations.every(isHarvestParticipation)
+
+const isHarvestInterestResult = (value: unknown): value is HarvestInterestResult =>
+  isRecord(value) &&
+  (typeof value.followUpId === 'string' || value.followUpId === null) &&
+  (value.followUpResult === 'created' || value.followUpResult === 'suppressed' || value.followUpResult === null) &&
+  ['recorded_interested', 'recorded_not_interested', 'already_interested', 'already_not_interested'].includes(String(value.result))
 
 const isSundayAttendanceRoster = (
   value: unknown,
@@ -972,6 +1083,52 @@ export function createAndRegisterSundayVisitor(accessToken: string, eventId: str
 
 export function removeSundayVisitor(accessToken: string, eventId: string, visitorId: string) {
   return requestApi(accessToken, `/events/${eventId}/visitors/${visitorId}`, isVisitorRegistrationResult, { method: 'DELETE' })
+}
+
+export function getHarvestEvents(accessToken: string) {
+  return requestApi(accessToken, '/events/harvest', isHarvestDirectory)
+}
+
+export function getHarvestEvent(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/harvest/${eventId}`, isHarvestEvent)
+}
+
+export function createHarvestEvent(accessToken: string, input: HarvestEventInput) {
+  return requestApi(accessToken, '/events/harvest', isHarvestEvent, {
+    body: JSON.stringify(input), method: 'POST',
+  })
+}
+
+export function updateHarvestEvent(accessToken: string, eventId: string, input: HarvestEventInput) {
+  return requestApi(accessToken, `/events/harvest/${eventId}`, isHarvestEvent, {
+    body: JSON.stringify(input), method: 'PATCH',
+  })
+}
+
+export function closeHarvestEvent(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/harvest/${eventId}/close`, isHarvestEvent, { method: 'POST' })
+}
+
+export function getHarvestParticipations(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/harvest/${eventId}/participations`, isHarvestParticipationRoster)
+}
+
+export function registerHarvestVisitor(accessToken: string, eventId: string, visitorId: string) {
+  return requestApi(accessToken, `/events/harvest/${eventId}/participations`, isVisitorRegistrationResult, {
+    body: JSON.stringify({ visitorId }), method: 'POST',
+  })
+}
+
+export function createAndRegisterHarvestVisitor(accessToken: string, eventId: string, input: VisitorInput) {
+  return requestApi(accessToken, `/events/harvest/${eventId}/participations/new`, isVisitorRegistrationResult, {
+    body: JSON.stringify(input), method: 'POST',
+  })
+}
+
+export function recordHarvestInterest(accessToken: string, eventId: string, visitorId: string, interested: boolean) {
+  return requestApi(accessToken, `/events/harvest/${eventId}/participations/${visitorId}/interest`, isHarvestInterestResult, {
+    body: JSON.stringify({ interested }), method: 'PATCH',
+  })
 }
 
 export function getVisitors(

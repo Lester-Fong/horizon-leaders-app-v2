@@ -39,7 +39,7 @@ describeLocal("Sunday Service API with local Supabase", () => {
     const { error: updateError } = await client.from("profiles").update({ role }).eq("id", data.user.id); if (updateError) throw updateError; return data.user.id;
   }
   async function group(name: string, leaderId: string) { const { data, error } = await client.from("life_groups").insert({ leader_profile_id: leaderId, name }).select("id").single(); if (error) throw error; groupIds.push(data.id); return data.id; }
-  async function member(firstName: string, groupId: string, email?: string) { const qrToken = randomBytes(32).toString("base64url"); const { data, error } = await client.from("members").insert({ email: email ?? null, first_name: firstName, last_name: "Service Member", life_group_id: groupId, qr_token: qrToken }).select("id").single(); if (error) throw error; memberIds.push(data.id); return { id: data.id, qrToken }; }
+  async function member(firstName: string, groupId: string, email?: string) { const qrToken = randomBytes(32).toString("base64url"); const { data, error } = await client.from("members").insert({ created_at: "2026-08-01T00:00:00+08:00", email: email ?? null, first_name: firstName, last_name: "Service Member", life_group_id: groupId, qr_token: qrToken }).select("id").single(); if (error) throw error; memberIds.push(data.id); return { id: data.id, qrToken }; }
   async function visitor(firstName: string, createdAt?: string) { const { data, error } = await client.from("visitors").insert({ created_at: createdAt, first_name: firstName, last_name: "Service Visitor" }).select("id").single(); if (error) throw error; visitorIds.push(data.id); return data.id; }
 
   it("enforces lifecycle, scoped attendance, QR, snapshots, and Sunday Visitor rules", async () => {

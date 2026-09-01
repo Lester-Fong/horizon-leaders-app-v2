@@ -48,6 +48,10 @@ const SundayServicePage = lazy(() =>
   import('./pages/SundayServicePage').then((module) => ({ default: module.SundayServicePage })),
 )
 
+const HarvestEventPage = lazy(() =>
+  import('./pages/HarvestEventPage').then((module) => ({ default: module.HarvestEventPage })),
+)
+
 const FollowUpsPage = lazy(() =>
   import('./pages/FollowUpsPage').then((module) => ({ default: module.FollowUpsPage })),
 )
@@ -122,6 +126,14 @@ function App() {
                 element={
                   <Suspense fallback={<LoadingState title="Loading Events" description="Preparing the Sunday Service directory." />}>
                     <EventsPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="events/harvest/:eventId"
+                element={
+                  <Suspense fallback={<LoadingState title="Loading Harvest" description="Preparing Visitor participation and Sunday interest." />}>
+                    <HarvestEventPage />
                   </Suspense>
                 }
               />
