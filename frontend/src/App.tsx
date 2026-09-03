@@ -1,4 +1,4 @@
-import { BookOpen, Users } from 'lucide-react'
+import { Users } from 'lucide-react'
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
@@ -54,6 +54,10 @@ const HarvestEventPage = lazy(() =>
 
 const FollowUpsPage = lazy(() =>
   import('./pages/FollowUpsPage').then((module) => ({ default: module.FollowUpsPage })),
+)
+
+const OpenCellPage = lazy(() =>
+  import('./pages/OpenCellPage').then((module) => ({ default: module.OpenCellPage })),
 )
 
 function App() {
@@ -171,11 +175,9 @@ function App() {
               <Route
                 path="opencell"
                 element={
-                  <ModulePlaceholderPage
-                    title="OpenCell"
-                    description="OpenCell Programmes, Sessions, and attendance remain intentionally deferred."
-                    icon={BookOpen}
-                  />
+                  <Suspense fallback={<LoadingState title="Loading OpenCell" description="Preparing the Programme workspace." />}>
+                    <OpenCellPage />
+                  </Suspense>
                 }
               />
               <Route

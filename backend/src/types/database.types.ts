@@ -447,6 +447,33 @@ export type Database = {
         }
         Relationships: []
       }
+      opencell_attendance: {
+        Row: { created_at: string; session_id: string; visitor_id: string }
+        Insert: { created_at?: string; session_id: string; visitor_id: string }
+        Update: { created_at?: string; session_id?: string; visitor_id?: string }
+        Relationships: [
+          { foreignKeyName: "opencell_attendance_session_id_fkey"; columns: ["session_id"]; isOneToOne: false; referencedRelation: "opencell_sessions"; referencedColumns: ["id"] },
+          { foreignKeyName: "opencell_attendance_visitor_id_fkey"; columns: ["visitor_id"]; isOneToOne: false; referencedRelation: "visitors"; referencedColumns: ["id"] }
+        ]
+      }
+      opencell_enrollments: {
+        Row: { created_at: string; enrolled_by_profile_id: string; enrolled_on: string; programme_id: string; visitor_id: string }
+        Insert: { created_at?: string; enrolled_by_profile_id: string; enrolled_on: string; programme_id: string; visitor_id: string }
+        Update: { created_at?: string; enrolled_by_profile_id?: string; enrolled_on?: string; programme_id?: string; visitor_id?: string }
+        Relationships: []
+      }
+      opencell_programmes: {
+        Row: { created_at: string; created_by_profile_id: string; description: string | null; finished_at: string | null; id: string; name: string; status: Database["public"]["Enums"]["opencell_programme_status"]; updated_at: string }
+        Insert: { created_at?: string; created_by_profile_id: string; description?: string | null; finished_at?: string | null; id?: string; name: string; status?: Database["public"]["Enums"]["opencell_programme_status"]; updated_at?: string }
+        Update: { created_at?: string; created_by_profile_id?: string; description?: string | null; finished_at?: string | null; id?: string; name?: string; status?: Database["public"]["Enums"]["opencell_programme_status"]; updated_at?: string }
+        Relationships: [{ foreignKeyName: "opencell_programmes_created_by_profile_id_fkey"; columns: ["created_by_profile_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }]
+      }
+      opencell_sessions: {
+        Row: { created_at: string; id: string; is_cancelled: boolean; location: string | null; notes: string | null; programme_id: string; session_date: string; title: string | null; updated_at: string }
+        Insert: { created_at?: string; id?: string; is_cancelled?: boolean; location?: string | null; notes?: string | null; programme_id: string; session_date: string; title?: string | null; updated_at?: string }
+        Update: { created_at?: string; id?: string; is_cancelled?: boolean; location?: string | null; notes?: string | null; programme_id?: string; session_date?: string; title?: string | null; updated_at?: string }
+        Relationships: [{ foreignKeyName: "opencell_sessions_programme_id_fkey"; columns: ["programme_id"]; isOneToOne: false; referencedRelation: "opencell_programmes"; referencedColumns: ["id"] }]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -652,6 +679,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      enroll_opencell_visitor: {
+        Args: { p_enrolled_by_profile_id: string; p_enrolled_on: string; p_programme_id: string; p_visitor_id: string }
+        Returns: { enrolled_on: string; outcome: string; programme_id: string; visitor_id: string }[]
+      }
+      finish_opencell_programme: {
+        Args: { p_programme_id: string }
+        Returns: { evaluations: Json; finished_at: string; outcome: string }[]
+      }
+      remove_opencell_enrollment: {
+        Args: { p_programme_id: string; p_visitor_id: string }
+        Returns: string
+      }
       close_sunday_service: {
         Args: { p_event_id: string }
         Returns: {
@@ -767,6 +806,7 @@ export type Database = {
       follow_up_status: "active" | "completed"
       member_gender: "male" | "female"
       visitor_status: "active" | "converted"
+      opencell_programme_status: "active" | "finished"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -905,6 +945,7 @@ export const Constants = {
       follow_up_status: ["active", "completed"],
       member_gender: ["male", "female"],
       visitor_status: ["active", "converted"],
+      opencell_programme_status: ["active", "finished"],
     },
   },
 } as const

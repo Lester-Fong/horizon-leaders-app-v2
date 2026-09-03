@@ -17,6 +17,7 @@ import {
   type LifeGroupService,
 } from "./life-groups/types.js";
 import { MemberServiceError, type MemberService } from "./members/types.js";
+import { OpenCellServiceError, type OpenCellService } from "./opencell/types.js";
 import {
   MinistryServiceError,
   type MinistryService,
@@ -30,6 +31,7 @@ import { createLifeGroupsRouter } from "./routes/life-groups.js";
 import { createMeRouter } from "./routes/me.js";
 import { createMembersRouter } from "./routes/members.js";
 import { createMinistriesRouter } from "./routes/ministries.js";
+import { createOpenCellRouter } from "./routes/opencell.js";
 import { createVisitorsRouter } from "./routes/visitors.js";
 import {
   VisitorServiceError,
@@ -46,6 +48,7 @@ export interface AppDependencies {
   lifeGroupService?: LifeGroupService;
   memberService?: MemberService;
   ministryService?: MinistryService;
+  openCellService?: OpenCellService;
   visitorService?: VisitorService;
 }
 
@@ -134,6 +137,9 @@ const unavailableVisitorService: VisitorService = {
   setLifeGroup: async () => unavailableVisitor(),
   update: async () => unavailableVisitor(),
 };
+const unavailableOpenCellService: OpenCellService = {
+  list: async () => unavailableOpenCell(), getById: async () => unavailableOpenCell(), create: async () => unavailableOpenCell(), update: async () => unavailableOpenCell(), finish: async () => unavailableOpenCell(), listSessions: async () => unavailableOpenCell(), createSession: async () => unavailableOpenCell(), updateSession: async () => unavailableOpenCell(), cancelSession: async () => unavailableOpenCell(), listParticipants: async () => unavailableOpenCell(), enroll: async () => unavailableOpenCell(), removeEnrollment: async () => unavailableOpenCell(), listAttendance: async () => unavailableOpenCell(), addAttendance: async () => unavailableOpenCell(), removeAttendance: async () => unavailableOpenCell(),
+};
 
 function unavailable(): never {
   throw new LifeGroupServiceError(
@@ -194,6 +200,7 @@ function unavailableVisitor(): never {
     "Visitor data is temporarily unavailable.",
   );
 }
+function unavailableOpenCell(): never { throw new OpenCellServiceError(500,"OPENCELL_SERVICE_UNAVAILABLE","OpenCell data is temporarily unavailable."); }
 
 export function createApp({
   authService,
@@ -205,6 +212,7 @@ export function createApp({
   lifeGroupService = unavailableLifeGroupService,
   memberService = unavailableMemberService,
   ministryService = unavailableMinistryService,
+  openCellService = unavailableOpenCellService,
   visitorService = unavailableVisitorService,
 }: AppDependencies) {
   const app = express();
@@ -220,6 +228,7 @@ export function createApp({
   app.use("/api", createGatheringsRouter(authService, gatheringService));
   app.use("/api", createMembersRouter(authService, memberService));
   app.use("/api", createMinistriesRouter(authService, ministryService));
+  app.use("/api", createOpenCellRouter(authService, openCellService));
   app.use("/api", createVisitorsRouter(authService, visitorService));
 
   return app;

@@ -554,6 +554,13 @@ export function createSupabaseVisitorService({
             "An affiliated Visitor must convert into their current Life Group.",
           );
         }
+        if (result.outcome === "active_opencell_enrollment") {
+          throw new VisitorServiceError(
+            409,
+            "ACTIVE_OPENCELL_ENROLLMENT",
+            "Finish the Visitor's active OpenCell Programme before converting them to a Member.",
+          );
+        }
         if (result.outcome === "visitor_changed") {
           throw new VisitorServiceError(
             409,

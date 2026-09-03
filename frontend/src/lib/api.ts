@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 export type AppRole = 'admin' | 'leader'
 
 export interface HorizonActor {
@@ -117,6 +118,13 @@ export interface MinistryMember {
   lifeGroup: MemberLifeGroup
   phone: string | null
 }
+
+export type OpenCellProgrammeStatus = 'active' | 'finished'
+export interface OpenCellProgramme { id:string; name:string; description:string|null; status:OpenCellProgrammeStatus; createdByProfileId:string; finishedAt:string|null; createdAt:string; updatedAt:string; sessionCount:number; participantCount:number }
+export interface OpenCellSession { id:string; programmeId:string; sessionDate:string; title:string|null; location:string|null; notes:string|null; isCancelled:boolean; createdAt:string; updatedAt:string; attendanceCount:number }
+export interface OpenCellParticipant { visitorId:string; firstName:string; lastName:string; email:string|null; phone:string|null; visitorStatus:'active'|'converted'; enrolledOn:string; attendedCount:number; eligibleSessionCount:number }
+export interface OpenCellEvaluation { visitorId:string; visitorName:string; attendedCount:number; eligibleSessionCount:number; percentage:number|null; qualified:boolean; followUpOutcome:'created'|'suppressed'|null }
+export interface OpenCellFinishResult { programme:OpenCellProgramme; evaluations:OpenCellEvaluation[] }
 
 export type MinistryListStatus = 'active' | 'archived' | 'all'
 
@@ -1393,3 +1401,29 @@ export async function getCurrentActor(
 
   return payload.data
 }
+
+const isOpenCellProgramme = (v: unknown): v is OpenCellProgramme => isRecord(v) && typeof v.id === 'string' && typeof v.name === 'string' && (v.status === 'active' || v.status === 'finished')
+const isOpenCellSession = (v: unknown): v is OpenCellSession => isRecord(v) && typeof v.id === 'string' && typeof v.sessionDate === 'string'
+const isOpenCellParticipant = (v: unknown): v is OpenCellParticipant => isRecord(v) && typeof v.visitorId === 'string' && typeof v.firstName === 'string'
+const isOpenCellProgrammeList = (v: unknown): v is OpenCellProgramme[] => Array.isArray(v) && v.every(isOpenCellProgramme)
+const isOpenCellSessionList = (v: unknown): v is OpenCellSession[] => Array.isArray(v) && v.every(isOpenCellSession)
+const isOpenCellParticipantList = (v: unknown): v is OpenCellParticipant[] => Array.isArray(v) && v.every(isOpenCellParticipant)
+const isOpenCellFinishResult = (v: unknown): v is OpenCellFinishResult => isRecord(v) && isOpenCellProgramme(v.programme) && Array.isArray(v.evaluations)
+const isAttendanceList = (v: unknown): v is {visitorId:string;present:boolean}[] => Array.isArray(v) && v.every(x => isRecord(x) && typeof x.visitorId === 'string' && typeof x.present === 'boolean')
+const isAny = (_v: unknown): _v is unknown => true
+
+export function getOpenCellProgrammes(accessToken:string, options:{status?:OpenCellProgrammeStatus|'all';search?:string}={}) { const query=new URLSearchParams(); if(options.status) query.set('status',options.status); if(options.search) query.set('search',options.search); return requestApi(accessToken,`/opencell/programmes${query.toString()?`?${query}`:''}`,isOpenCellProgrammeList) }
+export function getOpenCellProgramme(accessToken:string,id:string){return requestApi(accessToken,`/opencell/programmes/${id}`,isOpenCellProgramme)}
+export function createOpenCellProgramme(accessToken:string,input:{name:string;description:string|null}){return requestApi(accessToken,'/opencell/programmes',isOpenCellProgramme,{method:'POST',body:JSON.stringify(input)})}
+export function updateOpenCellProgramme(accessToken:string,id:string,input:{name?:string;description?:string|null}){return requestApi(accessToken,`/opencell/programmes/${id}`,isOpenCellProgramme,{method:'PATCH',body:JSON.stringify(input)})}
+export function finishOpenCellProgramme(accessToken:string,id:string){return requestApi(accessToken,`/opencell/programmes/${id}/finish`,isOpenCellFinishResult,{method:'POST'})}
+export function getOpenCellSessions(accessToken:string,id:string){return requestApi(accessToken,`/opencell/programmes/${id}/sessions`,isOpenCellSessionList)}
+export function createOpenCellSession(accessToken:string,id:string,input:{sessionDate:string;title:string|null;location:string|null;notes:string|null}){return requestApi(accessToken,`/opencell/programmes/${id}/sessions`,isOpenCellSession,{method:'POST',body:JSON.stringify(input)})}
+export function updateOpenCellSession(accessToken:string,pid:string,sid:string,input:Partial<{sessionDate:string;title:string|null;location:string|null;notes:string|null}>){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}`,isOpenCellSession,{method:'PATCH',body:JSON.stringify(input)})}
+export function cancelOpenCellSession(accessToken:string,pid:string,sid:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/cancel`,isOpenCellSession,{method:'PATCH'})}
+export function getOpenCellParticipants(accessToken:string,id:string){return requestApi(accessToken,`/opencell/programmes/${id}/participants`,isOpenCellParticipantList)}
+export function enrollOpenCellVisitor(accessToken:string,id:string,visitorId:string,enrolledOn:string){return requestApi(accessToken,`/opencell/programmes/${id}/participants`,isOpenCellParticipant,{method:'POST',body:JSON.stringify({visitorId,enrolledOn})})}
+export function removeOpenCellEnrollment(accessToken:string,id:string,visitorId:string){return requestApi(accessToken,`/opencell/programmes/${id}/participants/${visitorId}`,isAny,{method:'DELETE'})}
+export function getOpenCellAttendance(accessToken:string,pid:string,sid:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance`,isAttendanceList)}
+export function addOpenCellAttendance(accessToken:string,pid:string,sid:string,visitorId:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance`,isAny,{method:'POST',body:JSON.stringify({visitorId})})}
+export function removeOpenCellAttendance(accessToken:string,pid:string,sid:string,visitorId:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance/${visitorId}`,isAny,{method:'DELETE'})}

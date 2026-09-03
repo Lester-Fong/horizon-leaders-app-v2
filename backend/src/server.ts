@@ -8,6 +8,7 @@ import { createSupabaseHarvestService } from "./harvests/supabase-harvest-servic
 import { createSupabaseLifeGroupService } from "./life-groups/supabase-life-group-service.js";
 import { createSupabaseMemberService } from "./members/supabase-member-service.js";
 import { createSupabaseMinistryService } from "./ministries/supabase-ministry-service.js";
+import { createSupabaseOpenCellService } from "./opencell/supabase-opencell-service.js";
 import { createSupabaseVisitorService } from "./visitors/supabase-visitor-service.js";
 
 const authService = createSupabaseAuthService({
@@ -49,6 +50,10 @@ const visitorService = createSupabaseVisitorService({
   serviceRoleKey: config.supabaseServiceRoleKey,
   supabaseUrl: config.supabaseUrl,
 });
+const openCellService = createSupabaseOpenCellService({
+  serviceRoleKey: config.supabaseServiceRoleKey,
+  supabaseUrl: config.supabaseUrl,
+});
 
 const app = createApp({
   authService,
@@ -61,6 +66,7 @@ const app = createApp({
   memberService,
   ministryService,
   visitorService,
+  openCellService,
 });
 
 app.listen(config.port, () => {
