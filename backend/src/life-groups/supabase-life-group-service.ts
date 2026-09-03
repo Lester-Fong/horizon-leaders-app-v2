@@ -236,6 +236,57 @@ export function createSupabaseLifeGroupService({
       return hydrateSingle(await getLifeGroupRow(lifeGroupId));
     },
 
+    async getRoster(actor, lifeGroupId) {
+      const lifeGroupRow = await getLifeGroupRow(lifeGroupId);
+      if (
+        actor.role === "leader" &&
+        (!lifeGroupRow.is_active || lifeGroupRow.leader_profile_id !== actor.id)
+      ) {
+        throw new LifeGroupServiceError(
+          404,
+          "LIFE_GROUP_NOT_FOUND",
+          "Life Group was not found.",
+        );
+      }
+      const [lifeGroup, membersResult, visitorsResult] = await Promise.all([
+        hydrateSingle(lifeGroupRow),
+        supabase
+          .from("members")
+          .select("id, first_name, last_name, phone, email")
+          .eq("life_group_id", lifeGroupId)
+          .eq("is_active", true),
+        supabase
+          .from("visitors")
+          .select("id, first_name, last_name, phone, email")
+          .eq("life_group_id", lifeGroupId)
+          .eq("status", "active"),
+      ]);
+      if (membersResult.error || visitorsResult.error) throw serviceUnavailable();
+      const people = [
+        ...membersResult.data.map((member) => ({
+          email: member.email,
+          firstName: member.first_name,
+          id: member.id,
+          lastName: member.last_name,
+          personType: "member" as const,
+          phone: member.phone,
+        })),
+        ...visitorsResult.data.map((visitor) => ({
+          email: visitor.email,
+          firstName: visitor.first_name,
+          id: visitor.id,
+          lastName: visitor.last_name,
+          personType: "visitor" as const,
+          phone: visitor.phone,
+        })),
+      ].sort((left, right) =>
+        `${left.lastName} ${left.firstName}`.localeCompare(
+          `${right.lastName} ${right.firstName}`,
+        ),
+      );
+      return { lifeGroup, people };
+    },
+
     async listLeaderOptions(): Promise<LeaderOption[]> {
       const [{ data: profiles, error: profilesError }, { data: groups, error: groupsError }] =
         await Promise.all([

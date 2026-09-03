@@ -115,15 +115,41 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     const leaderList = await asActor("leader-a-token", "get", "/api/visitors?status=converted&search=Maria");
     expect(leaderList.body.data).toEqual([expect.objectContaining({ id: firstId, status: "active" })]);
 
+    const leaderAssigned = await asActor("leader-a-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: groupAId });
+    expect(leaderAssigned.status).toBe(200);
+    expect(leaderAssigned.body.data.lifeGroup.id).toBe(groupAId);
+    const leaderCannotTake = await asActor("leader-b-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: groupBId });
+    expect(leaderCannotTake.status).toBe(403);
+    const adminMoved = await asActor("admin-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: groupBId });
+    expect(adminMoved.status).toBe(200);
+    const leaderCannotUnassignOther = await asActor("leader-a-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: null });
+    expect(leaderCannotUnassignOther.status).toBe(403);
+    const leaderUnassignedOwn = await asActor("leader-b-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: null });
+    expect(leaderUnassignedOwn.status).toBe(200);
+    const inactiveAssignment = await asActor("admin-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: inactiveGroupId });
+    expect(inactiveAssignment.status).toBe(422);
+    const assignedForConversion = await asActor("leader-a-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: groupAId });
+    expect(assignedForConversion.status).toBe(200);
+
     const wrongGroup = await asActor("leader-a-token", "post", `/api/visitors/${firstId}/convert`).send({ lifeGroupId: groupBId });
-    const inactiveGroup = await asActor("admin-token", "post", `/api/visitors/${firstId}/convert`).send({ lifeGroupId: inactiveGroupId });
     expect(wrongGroup.status).toBe(403);
+    const otherLeaderConversion = await asActor("leader-b-token", "post", `/api/visitors/${firstId}/convert`).send({});
+    expect(otherLeaderConversion.status).toBe(403);
+
+    const inactiveAssignedVisitor = await asActor("admin-token", "post", "/api/visitors").send({ firstName: "Inactive", lastName: "Affiliation" });
+    const inactiveAssignedVisitorId = trackVisitor(inactiveAssignedVisitor)!;
+    const { error: inactiveAffiliationError } = await adminClient
+      .from("visitors")
+      .update({ life_group_id: inactiveGroupId })
+      .eq("id", inactiveAssignedVisitorId);
+    if (inactiveAffiliationError) throw inactiveAffiliationError;
+    const inactiveGroup = await asActor("admin-token", "post", `/api/visitors/${inactiveAssignedVisitorId}/convert`).send({});
     expect(inactiveGroup.status).toBe(422);
 
-    const converted = await asActor("leader-a-token", "post", `/api/visitors/${firstId}/convert`).send({ lifeGroupId: groupAId });
+    const converted = await asActor("leader-a-token", "post", `/api/visitors/${firstId}/convert`).send({});
     expect(converted.status).toBe(201);
     trackVisitor(converted);
-    expect(converted.body.data.visitor).toMatchObject({ convertedMemberId: converted.body.data.member.id, id: firstId, status: "converted" });
+    expect(converted.body.data.visitor).toMatchObject({ convertedMemberId: converted.body.data.member.id, id: firstId, lifeGroup: { id: groupAId }, status: "converted" });
     expect(converted.body.data.member).toMatchObject({ address: null, birthDate: null, email: "VISITOR.ONE@Example.Test", firstName: "Maria", gender: null, isActive: true, lastName: "One", lifeGroup: { id: groupAId }, phone: "0917 111 2233" });
     expect(converted.body.data.member.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
@@ -135,6 +161,8 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     expect(leaderHiddenDetail.status).toBe(404);
     expect(adminConvertedList.body.data).toEqual([expect.objectContaining({ id: firstId, status: "converted" })]);
     expect(adminConvertedDetail.status).toBe(200);
+    expect(adminConvertedDetail.body.data.lifeGroup.id).toBe(groupAId);
+    expect((await asActor("admin-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: null })).status).toBe(409);
     expect((await asActor("admin-token", "patch", `/api/visitors/${firstId}`).send({ firstName: "No" })).status).toBe(409);
     expect((await asActor("admin-token", "post", `/api/visitors/${firstId}/convert`).send({ lifeGroupId: groupAId })).status).toBe(409);
 

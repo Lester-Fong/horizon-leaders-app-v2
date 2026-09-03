@@ -102,6 +102,22 @@ export function createLifeGroupsRouter(
   );
 
   router.get(
+    "/life-groups/:lifeGroupId/roster",
+    authenticated,
+    async (request, response) => {
+      const lifeGroupId = readUuid(request.params.lifeGroupId);
+      if (!lifeGroupId || !request.actor) {
+        sendError(response, 400, "INVALID_REQUEST", "Life Group ID must be a valid UUID.");
+        return;
+      }
+      response.set("Cache-Control", "private, no-store");
+      await handleRequest(response, () =>
+        lifeGroupService.getRoster(request.actor!, lifeGroupId),
+      );
+    },
+  );
+
+  router.get(
     "/life-groups/:lifeGroupId",
     authenticated,
     async (request, response) => {

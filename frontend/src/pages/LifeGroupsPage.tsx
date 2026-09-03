@@ -33,11 +33,13 @@ import {
   ApiError,
   createLifeGroup,
   getLeaderOptions,
+  getLifeGroupRoster,
   getLifeGroups,
   setLifeGroupActive,
   updateLifeGroup,
   type LeaderOption,
   type LifeGroup,
+  type LifeGroupRoster,
 } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
@@ -82,6 +84,10 @@ export function LifeGroupsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [archiveGroup, setArchiveGroup] = useState<LifeGroup | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
+  const [rosterGroup, setRosterGroup] = useState<LifeGroup | null>(null)
+  const [roster, setRoster] = useState<LifeGroupRoster | null>(null)
+  const [rosterError, setRosterError] = useState<string | null>(null)
+  const [isRosterLoading, setIsRosterLoading] = useState(false)
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
@@ -224,6 +230,20 @@ export function LifeGroupsPage() {
     }
   }
 
+  async function openRoster(group: LifeGroup) {
+    setRosterGroup(group)
+    setRoster(null)
+    setRosterError(null)
+    setIsRosterLoading(true)
+    try {
+      setRoster(await getLifeGroupRoster(await getAccessToken(), group.id))
+    } catch (error) {
+      setRosterError(getErrorMessage(error))
+    } finally {
+      setIsRosterLoading(false)
+    }
+  }
+
   function getRowActions(group: LifeGroup): RowAction[] {
     const actions: RowAction[] = [
       {
@@ -232,6 +252,13 @@ export function LifeGroupsPage() {
         onSelect: () => navigate(`/life-groups/${group.id}/gatherings`),
       },
     ]
+    if (isAdmin || group.leader.id === actor?.id) {
+      actions.unshift({
+        icon: Users,
+        label: 'View current roster',
+        onSelect: () => void openRoster(group),
+      })
+    }
     if (!isAdmin) return actions
     return [
       ...actions,
@@ -366,6 +393,48 @@ export function LifeGroupsPage() {
           </tbody>
         </ResponsiveTable>
       )}
+
+      <Modal
+        className="max-w-2xl"
+        isOpen={Boolean(rosterGroup)}
+        onClose={() => !isRosterLoading && setRosterGroup(null)}
+        preventClose={isRosterLoading}
+        title={rosterGroup ? `${rosterGroup.name} roster` : 'Life Group roster'}
+        description="Current active Members and active affiliated Visitors. Visitor affiliation does not imply church membership."
+      >
+        {isRosterLoading ? (
+          <LoadingState title="Loading roster" description="Retrieving the authorized current Life Group roster." />
+        ) : rosterError ? (
+          <FeedbackBanner tone="error">{rosterError}</FeedbackBanner>
+        ) : roster ? (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between gap-4 border-y border-line py-3">
+              <span className="hm-label">Current people</span>
+              <span className="font-mono text-xs text-muted">{roster.people.length}</span>
+            </div>
+            {roster.people.length === 0 ? (
+              <p className="py-5 text-sm leading-6 text-muted">No active Members or affiliated Visitors are currently in this Life Group.</p>
+            ) : (
+              <ul className="divide-y divide-line border-b border-line">
+                {roster.people.map((person) => (
+                  <li key={`${person.personType}-${person.id}`} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-ink">{person.firstName} {person.lastName}</p>
+                      <p className="mt-1 break-words text-xs text-muted">{person.phone ?? 'No phone'} · {person.email ?? 'No email'}</p>
+                    </div>
+                    <StatusBadge tone={person.personType === 'member' ? 'neutral' : 'warning'}>
+                      {person.personType === 'member' ? 'Member' : 'Visitor'}
+                    </StatusBadge>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end border-t border-line pt-5">
+              <Button variant="secondary" onClick={() => setRosterGroup(null)}>Close</Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         isOpen={isAdmin && isFormOpen}

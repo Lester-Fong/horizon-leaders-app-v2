@@ -51,6 +51,12 @@ function createLifeGroupService(): LifeGroupService {
   return {
     create: vi.fn(async () => group),
     getById: vi.fn(async () => group),
+    getRoster: vi.fn(async () => ({
+      lifeGroup: group,
+      people: [
+        { email: null, firstName: "Mara", id: replacementLeaderId, lastName: "Member", personType: "member", phone: null },
+      ],
+    })),
     list: vi.fn(async () => [group]),
     listLeaderOptions: vi.fn(async () => [
       {
@@ -126,6 +132,17 @@ describe("Life Group API authorization and reads", () => {
     expect(adminResponse.status).toBe(200);
     expect(adminResponse.body.data).toHaveLength(2);
     expect(lifeGroupService.listLeaderOptions).toHaveBeenCalledOnce();
+  });
+
+  it("loads a role-scoped current roster without merging person domains", async () => {
+    const { app, lifeGroupService } = createTestApp();
+    const response = await request(app)
+      .get(`/api/life-groups/${groupId}/roster`)
+      .set("Authorization", "Bearer leader-token");
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.body.data.people[0].personType).toBe("member");
+    expect(lifeGroupService.getRoster).toHaveBeenCalledWith(actors.leader, groupId);
   });
 });
 

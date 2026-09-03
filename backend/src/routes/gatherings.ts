@@ -338,5 +338,69 @@ export function createGatheringsRouter(
     },
   );
 
+  router.post(
+    "/life-groups/:lifeGroupId/gatherings/:gatheringId/visitor-attendance",
+    authenticated,
+    async (request, response) => {
+      const ids = readNestedIds(
+        response,
+        request.params.lifeGroupId,
+        request.params.gatheringId,
+      );
+      const visitorId = isRecord(request.body)
+        ? readUuid(request.body.visitorId)
+        : undefined;
+      if (
+        !ids?.gatheringId ||
+        !request.actor ||
+        !visitorId ||
+        !isRecord(request.body) ||
+        Object.keys(request.body).some((key) => key !== "visitorId")
+      ) {
+        if (ids?.gatheringId && request.actor) {
+          sendError(response, 400, "INVALID_REQUEST", "A valid Visitor ID is required.");
+        }
+        return;
+      }
+      await handleRequest(
+        response,
+        () => gatheringService.addVisitorAttendance(
+          request.actor!,
+          ids.lifeGroupId,
+          ids.gatheringId!,
+          visitorId,
+        ),
+        201,
+      );
+    },
+  );
+
+  router.delete(
+    "/life-groups/:lifeGroupId/gatherings/:gatheringId/visitor-attendance/:visitorId",
+    authenticated,
+    async (request, response) => {
+      const ids = readNestedIds(
+        response,
+        request.params.lifeGroupId,
+        request.params.gatheringId,
+      );
+      const visitorId = readUuid(request.params.visitorId);
+      if (!ids?.gatheringId || !visitorId || !request.actor) {
+        if (ids?.gatheringId && !visitorId) {
+          sendError(response, 400, "INVALID_REQUEST", "Visitor ID must be a valid UUID.");
+        }
+        return;
+      }
+      await handleRequest(response, () =>
+        gatheringService.removeVisitorAttendance(
+          request.actor!,
+          ids.lifeGroupId,
+          ids.gatheringId!,
+          visitorId,
+        ),
+      );
+    },
+  );
+
   return router;
 }

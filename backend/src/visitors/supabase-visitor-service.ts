@@ -34,7 +34,7 @@ type MemberConflictRow = Pick<
 >;
 
 const VISITOR_COLUMNS =
-  "id, first_name, last_name, phone, email, normalized_phone, normalized_email, status, converted_member_id, created_at, updated_at";
+  "id, first_name, last_name, phone, email, normalized_phone, normalized_email, life_group_id, status, converted_member_id, created_at, updated_at";
 const LIFE_GROUP_COLUMNS = "id, name, is_active, leader_profile_id";
 
 function serviceUnavailable() {
@@ -70,7 +70,10 @@ function mapVisitorWriteError(error: { code?: string; message?: string }) {
   return serviceUnavailable();
 }
 
-function mapVisitor(visitor: VisitorRow): Visitor {
+function mapVisitor(
+  visitor: VisitorRow,
+  lifeGroup?: { id: string; is_active: boolean; name: string },
+): Visitor {
   return {
     convertedMemberId: visitor.converted_member_id,
     createdAt: visitor.created_at,
@@ -78,6 +81,9 @@ function mapVisitor(visitor: VisitorRow): Visitor {
     firstName: visitor.first_name,
     id: visitor.id,
     lastName: visitor.last_name,
+    lifeGroup: lifeGroup
+      ? { id: lifeGroup.id, isActive: lifeGroup.is_active, name: lifeGroup.name }
+      : null,
     phone: visitor.phone,
     status: visitor.status,
     updatedAt: visitor.updated_at,
@@ -132,10 +138,67 @@ export function createSupabaseVisitorService({
     return data;
   }
 
-  async function validateConversionGroup(
+  async function getOwnedLifeGroup(actor: HorizonActor) {
+    const { data, error } = await supabase
+      .from("life_groups")
+      .select(LIFE_GROUP_COLUMNS)
+      .eq("leader_profile_id", actor.id)
+      .maybeSingle();
+    if (error) throw serviceUnavailable();
+    return data;
+  }
+
+  async function hydrateVisitors(rows: VisitorRow[]) {
+    const lifeGroupIds = [
+      ...new Set(rows.flatMap((visitor) => visitor.life_group_id ?? [])),
+    ];
+    if (lifeGroupIds.length === 0) return rows.map((visitor) => mapVisitor(visitor));
+    const { data, error } = await supabase
+      .from("life_groups")
+      .select("id, name, is_active")
+      .in("id", lifeGroupIds);
+    if (error || data.length !== lifeGroupIds.length) throw serviceUnavailable();
+    const lifeGroups = new Map(data.map((lifeGroup) => [lifeGroup.id, lifeGroup]));
+    return rows.map((visitor) =>
+      mapVisitor(
+        visitor,
+        visitor.life_group_id
+          ? lifeGroups.get(visitor.life_group_id)
+          : undefined,
+      ),
+    );
+  }
+
+  async function hydrateVisitor(visitor: VisitorRow) {
+    const [hydrated] = await hydrateVisitors([visitor]);
+    if (!hydrated) throw serviceUnavailable();
+    return hydrated;
+  }
+
+  async function resolveConversionGroup(
     actor: HorizonActor,
-    lifeGroupId: string,
+    visitor: VisitorRow,
+    requestedLifeGroupId: string | null,
   ) {
+    if (
+      visitor.life_group_id &&
+      requestedLifeGroupId &&
+      requestedLifeGroupId !== visitor.life_group_id
+    ) {
+      throw new VisitorServiceError(
+        403,
+        "VISITOR_SCOPE_FORBIDDEN",
+        "An affiliated Visitor must convert into their current Life Group.",
+      );
+    }
+    const lifeGroupId = visitor.life_group_id ?? requestedLifeGroupId;
+    if (!lifeGroupId) {
+      throw new VisitorServiceError(
+        422,
+        "LIFE_GROUP_REQUIRED",
+        "Select an active Life Group for this unassigned Visitor.",
+      );
+    }
     const lifeGroup = await getLifeGroup(lifeGroupId);
     if (!lifeGroup.is_active) {
       throw new VisitorServiceError(
@@ -148,7 +211,7 @@ export function createSupabaseVisitorService({
       throw new VisitorServiceError(
         403,
         "VISITOR_SCOPE_FORBIDDEN",
-        "Leaders may convert Visitors only into their own Life Group.",
+        "Leaders may convert only unassigned Visitors or Visitors affiliated with their own Life Group.",
       );
     }
     return lifeGroup;
@@ -163,6 +226,7 @@ export function createSupabaseVisitorService({
       visitor.lastName,
       visitor.email,
       visitor.phone,
+      visitor.lifeGroup?.name,
     ].some((value) => value?.toLocaleLowerCase().includes(needle));
   }
 
@@ -250,13 +314,13 @@ export function createSupabaseVisitorService({
       }
       const { data, error } = await query;
       if (error) throw serviceUnavailable();
-      return data.map(mapVisitor).filter((visitor) =>
+      return (await hydrateVisitors(data)).filter((visitor) =>
         matchesSearch(visitor, options.search),
       );
     },
 
     async getById(actor, visitorId) {
-      if (actor.role === "admin") return mapVisitor(await getVisitorRow(visitorId));
+      if (actor.role === "admin") return hydrateVisitor(await getVisitorRow(visitorId));
       const { data, error } = await supabase
         .from("visitors")
         .select(VISITOR_COLUMNS)
@@ -271,7 +335,7 @@ export function createSupabaseVisitorService({
           "Visitor was not found.",
         );
       }
-      return mapVisitor(data);
+      return hydrateVisitor(data);
     },
 
     async create(input) {
@@ -287,7 +351,7 @@ export function createSupabaseVisitorService({
         .select(VISITOR_COLUMNS)
         .single();
       if (error) throw mapVisitorWriteError(error);
-      return mapVisitor(data);
+      return hydrateVisitor(data);
     },
 
     async update(actor, visitorId, input) {
@@ -319,10 +383,84 @@ export function createSupabaseVisitorService({
         .select(VISITOR_COLUMNS)
         .single();
       if (error) throw mapVisitorWriteError(error);
-      return mapVisitor(data);
+      return hydrateVisitor(data);
     },
 
-    async convert(actor, visitorId, lifeGroupId) {
+    async setLifeGroup(actor, visitorId, lifeGroupId) {
+      const visitor = await getVisitorRow(visitorId);
+      if (visitor.status !== "active") {
+        throw new VisitorServiceError(
+          actor.role === "leader" ? 404 : 409,
+          actor.role === "leader" ? "VISITOR_NOT_FOUND" : "VISITOR_NOT_ACTIVE",
+          actor.role === "leader"
+            ? "Visitor was not found."
+            : "Converted Visitors cannot be reassigned.",
+        );
+      }
+
+      let targetLifeGroup = null;
+      if (lifeGroupId) {
+        targetLifeGroup = await getLifeGroup(lifeGroupId);
+        if (!targetLifeGroup.is_active) {
+          throw new VisitorServiceError(
+            422,
+            "INACTIVE_LIFE_GROUP",
+            "Visitors may be assigned only to an active Life Group.",
+          );
+        }
+      }
+
+      if (actor.role === "leader") {
+        const ownLifeGroup = await getOwnedLifeGroup(actor);
+        const isAssigningUnassignedToOwnActiveGroup =
+          visitor.life_group_id === null &&
+          targetLifeGroup?.id === ownLifeGroup?.id &&
+          ownLifeGroup?.is_active === true;
+        const isUnassigningFromOwnGroup =
+          lifeGroupId === null && visitor.life_group_id === ownLifeGroup?.id;
+        if (!isAssigningUnassignedToOwnActiveGroup && !isUnassigningFromOwnGroup) {
+          throw new VisitorServiceError(
+            403,
+            "VISITOR_SCOPE_FORBIDDEN",
+            "Leaders may assign an unassigned Visitor to their own active Life Group or unassign a Visitor from that group.",
+          );
+        }
+      }
+
+      const { data, error } = await supabase.rpc("set_visitor_life_group", {
+        p_expected_life_group_id: visitor.life_group_id,
+        p_life_group_id: lifeGroupId,
+        p_visitor_id: visitorId,
+      });
+      if (error) throw serviceUnavailable();
+      if (data === "visitor_not_found") {
+        throw new VisitorServiceError(404, "VISITOR_NOT_FOUND", "Visitor was not found.");
+      }
+      if (data === "visitor_not_active") {
+        throw new VisitorServiceError(
+          actor.role === "leader" ? 404 : 409,
+          actor.role === "leader" ? "VISITOR_NOT_FOUND" : "VISITOR_NOT_ACTIVE",
+          actor.role === "leader" ? "Visitor was not found." : "Converted Visitors cannot be reassigned.",
+        );
+      }
+      if (data === "visitor_changed") {
+        throw new VisitorServiceError(
+          409,
+          "VISITOR_CHANGED",
+          "The Visitor's Life Group changed while this request was being processed. Refresh and try again.",
+        );
+      }
+      if (data === "life_group_not_found") {
+        throw new VisitorServiceError(422, "LIFE_GROUP_NOT_FOUND", "The selected Life Group does not exist.");
+      }
+      if (data === "inactive_life_group") {
+        throw new VisitorServiceError(422, "INACTIVE_LIFE_GROUP", "Visitors may be assigned only to an active Life Group.");
+      }
+      if (data !== "updated") throw serviceUnavailable();
+      return hydrateVisitor(await getVisitorRow(visitorId));
+    },
+
+    async convert(actor, visitorId, requestedLifeGroupId) {
       const visitor = await getVisitorRow(visitorId);
       if (visitor.status !== "active") {
         if (actor.role === "leader") {
@@ -338,7 +476,11 @@ export function createSupabaseVisitorService({
           "This Visitor has already been converted.",
         );
       }
-      await validateConversionGroup(actor, lifeGroupId);
+      const lifeGroup = await resolveConversionGroup(
+        actor,
+        visitor,
+        requestedLifeGroupId,
+      );
 
       for (
         let attempt = 0;
@@ -346,7 +488,8 @@ export function createSupabaseVisitorService({
         attempt += 1
       ) {
         const { data, error } = await supabase.rpc("convert_visitor_to_member", {
-          p_life_group_id: lifeGroupId,
+          p_expected_life_group_id: visitor.life_group_id,
+          p_life_group_id: lifeGroup.id,
           p_qr_token: generateQrToken(),
           p_visitor_id: visitorId,
         });
@@ -397,6 +540,27 @@ export function createSupabaseVisitorService({
             "Visitor conversion requires an active Life Group.",
           );
         }
+        if (result.outcome === "life_group_required") {
+          throw new VisitorServiceError(
+            422,
+            "LIFE_GROUP_REQUIRED",
+            "Select an active Life Group for this unassigned Visitor.",
+          );
+        }
+        if (result.outcome === "life_group_mismatch") {
+          throw new VisitorServiceError(
+            403,
+            "VISITOR_SCOPE_FORBIDDEN",
+            "An affiliated Visitor must convert into their current Life Group.",
+          );
+        }
+        if (result.outcome === "visitor_changed") {
+          throw new VisitorServiceError(
+            409,
+            "VISITOR_CHANGED",
+            "The Visitor's Life Group changed while conversion was being processed. Refresh and try again.",
+          );
+        }
         if (result.outcome !== "converted" || !result.created_member_id) {
           throw serviceUnavailable();
         }
@@ -405,7 +569,7 @@ export function createSupabaseVisitorService({
           getVisitorRow(visitorId),
           memberService.getById(actor, result.created_member_id),
         ]);
-        return { member, visitor: mapVisitor(convertedVisitor) };
+        return { member, visitor: await hydrateVisitor(convertedVisitor) };
       }
 
       throw serviceUnavailable();

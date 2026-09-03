@@ -27,6 +27,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { RowActionsMenu, type RowAction } from '../components/ui/RowActionsMenu'
+import { StatusBadge } from '../components/ui/StatusBadge'
 import {
   ApiError,
   createGathering,
@@ -34,9 +35,12 @@ import {
   getGatheringAttendance,
   getGatherings,
   markGatheringAttendance,
+  markGatheringVisitorAttendance,
   removeGatheringAttendance,
+  removeGatheringVisitorAttendance,
   updateGathering,
   type GatheringAttendanceMember,
+  type GatheringAttendanceVisitor,
   type GatheringInput,
   type GatheringLifeGroup,
   type LifeGroupGathering,
@@ -68,8 +72,12 @@ function gatheringName(gathering: LifeGroupGathering) {
   return gathering.title ?? `Gathering on ${formatDate(gathering.gatheringDate)}`
 }
 
-function memberName(member: GatheringAttendanceMember) {
-  return `${member.firstName} ${member.lastName}`
+type AttendancePerson =
+  | (GatheringAttendanceMember & { personType: 'member' })
+  | (GatheringAttendanceVisitor & { personType: 'visitor' })
+
+function personName(person: AttendancePerson) {
+  return `${person.firstName} ${person.lastName}`
 }
 
 function DetailItem({ label, value }: { label: string; value: string }) {
@@ -97,11 +105,11 @@ export function GatheringsPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [attendanceTarget, setAttendanceTarget] = useState<LifeGroupGathering | null>(null)
-  const [roster, setRoster] = useState<GatheringAttendanceMember[]>([])
+  const [roster, setRoster] = useState<AttendancePerson[]>([])
   const [attendanceSearch, setAttendanceSearch] = useState('')
   const [attendanceError, setAttendanceError] = useState<string | null>(null)
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false)
-  const [changingMemberId, setChangingMemberId] = useState<string | null>(null)
+  const [changingPersonKey, setChangingPersonKey] = useState<string | null>(null)
 
   const loadDirectory = useCallback(async () => {
     if (!lifeGroupId) return
@@ -150,7 +158,10 @@ export function GatheringsPage() {
     try {
       const token = await getAccessToken()
       const result = await getGatheringAttendance(token, lifeGroupId, gathering.id)
-      setRoster(result.members)
+      setRoster([
+        ...result.members.map((member) => ({ ...member, personType: 'member' as const })),
+        ...result.visitors.map((visitor) => ({ ...visitor, personType: 'visitor' as const })),
+      ].sort((left, right) => personName(left).localeCompare(personName(right))))
     } catch (error) {
       setAttendanceError(errorMessage(error))
     } finally {
@@ -176,33 +187,32 @@ export function GatheringsPage() {
     void loadDirectory()
   }
 
-  async function changeAttendance(member: GatheringAttendanceMember) {
+  async function changeAttendance(person: AttendancePerson) {
     if (!lifeGroupId || !attendanceTarget) return
-    setChangingMemberId(member.id)
+    const personKey = `${person.personType}:${person.id}`
+    setChangingPersonKey(personKey)
     setAttendanceError(null)
     try {
       const token = await getAccessToken()
-      if (member.isPresent) {
-        await removeGatheringAttendance(
-          token,
-          lifeGroupId,
-          attendanceTarget.id,
-          member.id,
-        )
+      if (person.isPresent) {
+        if (person.personType === 'member') {
+          await removeGatheringAttendance(token, lifeGroupId, attendanceTarget.id, person.id)
+        } else {
+          await removeGatheringVisitorAttendance(token, lifeGroupId, attendanceTarget.id, person.id)
+        }
       } else {
-        await markGatheringAttendance(
-          token,
-          lifeGroupId,
-          attendanceTarget.id,
-          member.id,
-        )
+        if (person.personType === 'member') {
+          await markGatheringAttendance(token, lifeGroupId, attendanceTarget.id, person.id)
+        } else {
+          await markGatheringVisitorAttendance(token, lifeGroupId, attendanceTarget.id, person.id)
+        }
       }
-      const isPresent = !member.isPresent
+      const isPresent = !person.isPresent
       setRoster((current) =>
-        current.map((currentMember) =>
-          currentMember.id === member.id
-            ? { ...currentMember, isPresent }
-            : currentMember,
+        current.map((currentPerson) =>
+          currentPerson.id === person.id && currentPerson.personType === person.personType
+            ? { ...currentPerson, isPresent }
+            : currentPerson,
         ),
       )
       setGatherings((current) =>
@@ -232,26 +242,27 @@ export function GatheringsPage() {
     } catch (error) {
       setAttendanceError(errorMessage(error))
     } finally {
-      setChangingMemberId(null)
+      setChangingPersonKey(null)
     }
   }
 
   const filteredRoster = useMemo(() => {
     const query = attendanceSearch.trim().toLocaleLowerCase('en')
     if (!query) return roster
-    return roster.filter((member) =>
+    return roster.filter((person) =>
       [
-        member.firstName,
-        member.lastName,
-        member.email ?? '',
-        member.phone ?? '',
+        person.firstName,
+        person.lastName,
+        person.email ?? '',
+        person.phone ?? '',
+        person.personType,
       ].some((value) => value.toLocaleLowerCase('en').includes(query)),
     )
   }, [attendanceSearch, roster])
 
-  const currentMembers = filteredRoster.filter((member) => member.isEligible)
-  const historicalMembers = filteredRoster.filter(
-    (member) => !member.isEligible && member.isPresent,
+  const currentPeople = filteredRoster.filter((person) => person.isEligible)
+  const historicalPeople = filteredRoster.filter(
+    (person) => !person.isEligible && person.isPresent,
   )
   const presentCount = roster.filter((member) => member.isPresent).length
 
@@ -314,7 +325,7 @@ export function GatheringsPage() {
       <PageHeader
         marker="Life Group / Gatherings"
         title={lifeGroup?.name ?? 'Gatherings'}
-        description="Review meeting history, keep practical notes, and record Member presence for this Life Group."
+        description="Review meeting history, keep practical notes, and record Member and affiliated Visitor presence for this Life Group."
         actions={
           <>
             <Button
@@ -472,10 +483,10 @@ export function GatheringsPage() {
       <Modal
         className="max-w-3xl"
         isOpen={Boolean(attendanceTarget)}
-        onClose={() => !changingMemberId && setAttendanceTarget(null)}
-        preventClose={Boolean(changingMemberId)}
+        onClose={() => !changingPersonKey && setAttendanceTarget(null)}
+        preventClose={Boolean(changingPersonKey)}
         title={attendanceTarget ? `Attendance — ${gatheringName(attendanceTarget)}` : 'Manage attendance'}
-        description="Presence is recorded manually. An unchecked Member has no attendance record; absence is not stored."
+        description="Presence is recorded separately for Members and Visitors. An unchecked person has no attendance record; absence is not stored."
       >
         {attendanceError && (
           <FeedbackBanner className="mb-5" tone="error">{attendanceError}</FeedbackBanner>
@@ -485,7 +496,7 @@ export function GatheringsPage() {
         ) : attendanceTarget ? (
           <div className="space-y-6">
             <div className="flex flex-col gap-4 border-b border-line pb-5 sm:flex-row sm:items-end sm:justify-between">
-              <FormField id="attendance-search" label="Find a Member" description="Name, email, or phone">
+              <FormField id="attendance-search" label="Find a person" description="Member or Visitor name, email, or phone">
                 <div className="relative">
                   <Search aria-hidden="true" className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted" />
                   <TextInput
@@ -495,7 +506,7 @@ export function GatheringsPage() {
                     className="pl-10"
                     value={attendanceSearch}
                     placeholder="Search roster"
-                    disabled={Boolean(changingMemberId)}
+                    disabled={Boolean(changingPersonKey)}
                     onChange={(event) => setAttendanceSearch(event.target.value)}
                   />
                 </div>
@@ -509,29 +520,31 @@ export function GatheringsPage() {
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <p className="hm-label">Current Life Group</p>
-                  <h3 id="current-roster-heading" className="mt-1 text-base font-semibold text-ink">Member roster</h3>
+                  <h3 id="current-roster-heading" className="mt-1 text-base font-semibold text-ink">Current roster</h3>
+                  <p className="mt-1 text-sm text-muted">Active Members and affiliated Visitors.</p>
                 </div>
-                <span className="font-mono text-xs text-muted">{currentMembers.length}</span>
+                <span className="font-mono text-xs text-muted">{currentPeople.length}</span>
               </div>
-              {currentMembers.length === 0 ? (
-                <p className="py-7 text-sm text-muted">No current Members match this search.</p>
+              {currentPeople.length === 0 ? (
+                <p className="py-7 text-sm text-muted">No eligible Members or Visitors match this search.</p>
               ) : (
                 <ul className="mt-3 divide-y divide-line border-y border-line">
-                  {currentMembers.map((member) => (
-                    <li key={member.id} className="flex items-center gap-4 py-3">
+                  {currentPeople.map((person) => (
+                    <li key={`${person.personType}-${person.id}`} className="flex items-center gap-4 py-3">
                       <input
-                        id={`attendance-${member.id}`}
+                        id={`attendance-${person.personType}-${person.id}`}
                         type="checkbox"
                         className="size-5 shrink-0 accent-[var(--hm-ink)]"
-                        checked={member.isPresent}
-                        disabled={Boolean(changingMemberId)}
-                        onChange={() => void changeAttendance(member)}
+                        checked={person.isPresent}
+                        disabled={Boolean(changingPersonKey)}
+                        onChange={() => void changeAttendance(person)}
                       />
-                      <label htmlFor={`attendance-${member.id}`} className="min-w-0 flex-1 cursor-pointer">
-                        <span className="block text-sm font-semibold text-ink">{memberName(member)}</span>
-                        <span className="mt-1 block font-mono text-xs text-muted">
-                          {member.isActive ? 'Active Member' : 'Archived Member'}{member.isPresent ? ' / Present' : ' / Not marked'}
+                      <label htmlFor={`attendance-${person.personType}-${person.id}`} className="min-w-0 flex-1 cursor-pointer">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-ink">{personName(person)}</span>
+                          <StatusBadge tone={person.personType === 'member' ? 'neutral' : 'warning'}>{person.personType}</StatusBadge>
                         </span>
+                        <span className="mt-1 block font-mono text-xs text-muted">{person.isPresent ? 'Present' : 'Not marked'}</span>
                       </label>
                     </li>
                   ))}
@@ -539,29 +552,36 @@ export function GatheringsPage() {
               )}
             </section>
 
-            {historicalMembers.length > 0 && (
+            {historicalPeople.length > 0 && (
               <section aria-labelledby="historical-attendance-heading">
                 <p className="hm-label">Preserved history</p>
                 <h3 id="historical-attendance-heading" className="mt-1 text-base font-semibold text-ink">
-                  Members now in another Life Group
+                  Historical attendees
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  These presence records remain historical truth. They may be removed to correct an error, but cannot be added back while the Member belongs elsewhere.
+                  These presence records remain historical truth after movement, unassignment, archive, or Visitor conversion. They may be removed as a correction but cannot be re-added while ineligible.
                 </p>
                 <ul className="mt-3 divide-y divide-line border-y border-line">
-                  {historicalMembers.map((member) => (
-                    <li key={member.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  {historicalPeople.map((person) => (
+                    <li key={`${person.personType}-${person.id}`} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-ink">{memberName(member)}</p>
+                        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+                          {personName(person)}
+                          <StatusBadge tone={person.personType === 'member' ? 'neutral' : 'warning'}>{person.personType}</StatusBadge>
+                        </p>
                         <p className="mt-1 font-mono text-xs text-muted">
-                          Present / Now in {member.currentLifeGroup.name}
+                          Present / {person.personType === 'visitor' && person.status === 'converted'
+                            ? 'Converted Visitor'
+                            : person.currentLifeGroup
+                              ? `Now in ${person.currentLifeGroup.name}`
+                              : 'Now unassigned'}
                         </p>
                       </div>
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={Boolean(changingMemberId)}
-                        onClick={() => void changeAttendance(member)}
+                        disabled={Boolean(changingPersonKey)}
+                        onClick={() => void changeAttendance(person)}
                       >
                         Remove record
                       </Button>
@@ -572,7 +592,7 @@ export function GatheringsPage() {
             )}
 
             <div className="flex justify-end border-t border-line pt-5">
-              <Button variant="secondary" disabled={Boolean(changingMemberId)} onClick={() => setAttendanceTarget(null)}>
+              <Button variant="secondary" disabled={Boolean(changingPersonKey)} onClick={() => setAttendanceTarget(null)}>
                 Done
               </Button>
             </div>

@@ -10,6 +10,7 @@ import type {
 import {
   GatheringServiceError,
   type GatheringAttendanceMember,
+  type GatheringAttendanceVisitor,
   type GatheringInput,
   type GatheringLifeGroup,
   type GatheringService,
@@ -36,12 +37,24 @@ type MemberRow = Pick<
   | "life_group_id"
   | "phone"
 >;
+type VisitorRow = Pick<
+  Tables<"visitors">,
+  | "email"
+  | "first_name"
+  | "id"
+  | "last_name"
+  | "life_group_id"
+  | "phone"
+  | "status"
+>;
 
 const GATHERING_COLUMNS =
   "id, life_group_id, gathering_date, title, location, notes, created_by_profile_id, created_at, updated_at";
 const LIFE_GROUP_COLUMNS = "id, name, is_active, leader_profile_id";
 const MEMBER_COLUMNS =
   "id, first_name, last_name, phone, email, life_group_id, is_active";
+const VISITOR_COLUMNS =
+  "id, first_name, last_name, phone, email, life_group_id, status";
 
 function serviceUnavailable() {
   return new GatheringServiceError(
@@ -121,13 +134,19 @@ export function createSupabaseGatheringService({
 
   async function attendanceCounts(gatheringIds: string[]) {
     if (gatheringIds.length === 0) return new Map<string, number>();
-    const { data, error } = await supabase
-      .from("life_group_gathering_attendance")
-      .select("gathering_id")
-      .in("gathering_id", gatheringIds);
-    if (error) throw serviceUnavailable();
+    const [members, visitors] = await Promise.all([
+      supabase
+        .from("life_group_gathering_attendance")
+        .select("gathering_id")
+        .in("gathering_id", gatheringIds),
+      supabase
+        .from("life_group_gathering_visitor_attendance")
+        .select("gathering_id")
+        .in("gathering_id", gatheringIds),
+    ]);
+    if (members.error || visitors.error) throw serviceUnavailable();
     const counts = new Map<string, number>();
-    for (const attendance of data) {
+    for (const attendance of [...members.data, ...visitors.data]) {
       counts.set(
         attendance.gathering_id,
         (counts.get(attendance.gathering_id) ?? 0) + 1,
@@ -190,8 +209,20 @@ export function createSupabaseGatheringService({
     return data;
   }
 
+  async function loadVisitors(visitorIds?: string[]) {
+    let query = supabase.from("visitors").select(VISITOR_COLUMNS);
+    if (visitorIds) {
+      if (visitorIds.length === 0) return [];
+      query = query.in("id", visitorIds);
+    }
+    const { data, error } = await query;
+    if (error) throw serviceUnavailable();
+    return data;
+  }
+
   async function lifeGroupNames(lifeGroupIds: string[]) {
     const ids = [...new Set(lifeGroupIds)];
+    if (ids.length === 0) return new Map<string, string>();
     const { data, error } = await supabase
       .from("life_groups")
       .select("id, name")
@@ -218,10 +249,44 @@ export function createSupabaseGatheringService({
         firstName: member.first_name,
         id: member.id,
         isActive: member.is_active,
-        isEligible: member.life_group_id === gatheringLifeGroupId,
+        isEligible: member.is_active && member.life_group_id === gatheringLifeGroupId,
         isPresent: presentIds.has(member.id),
         lastName: member.last_name,
         phone: member.phone,
+      }))
+      .sort((left, right) =>
+        `${left.lastName} ${left.firstName}`.localeCompare(
+          `${right.lastName} ${right.firstName}`,
+        ),
+      );
+  }
+
+  async function mapAttendanceVisitors(
+    visitors: VisitorRow[],
+    gatheringLifeGroupId: string,
+    presentIds: Set<string>,
+  ) {
+    const groupNames = await lifeGroupNames(
+      visitors.flatMap((visitor) => visitor.life_group_id ?? []),
+    );
+    return visitors
+      .map<GatheringAttendanceVisitor>((visitor) => ({
+        currentLifeGroup: visitor.life_group_id
+          ? {
+              id: visitor.life_group_id,
+              name: groupNames.get(visitor.life_group_id) ?? "Unknown Life Group",
+            }
+          : null,
+        email: visitor.email,
+        firstName: visitor.first_name,
+        id: visitor.id,
+        isEligible:
+          visitor.status === "active" &&
+          visitor.life_group_id === gatheringLifeGroupId,
+        isPresent: presentIds.has(visitor.id),
+        lastName: visitor.last_name,
+        phone: visitor.phone,
+        status: visitor.status,
       }))
       .sort((left, right) =>
         `${left.lastName} ${left.firstName}`.localeCompare(
@@ -307,25 +372,59 @@ export function createSupabaseGatheringService({
 
     async getAttendance(actor, lifeGroupId, gatheringId) {
       await getScopedGathering(actor, lifeGroupId, gatheringId);
-      const { data: attendance, error: attendanceError } = await supabase
-        .from("life_group_gathering_attendance")
-        .select("member_id")
-        .eq("gathering_id", gatheringId);
-      if (attendanceError) throw serviceUnavailable();
-      const presentIds = new Set(attendance.map((row) => row.member_id));
-      const { data: currentMembers, error: currentError } = await supabase
-        .from("members")
-        .select(MEMBER_COLUMNS)
-        .eq("life_group_id", lifeGroupId);
-      if (currentError) throw serviceUnavailable();
+      const [memberAttendance, visitorAttendance, currentMemberResult, currentVisitorResult] =
+        await Promise.all([
+          supabase
+            .from("life_group_gathering_attendance")
+            .select("member_id")
+            .eq("gathering_id", gatheringId),
+          supabase
+            .from("life_group_gathering_visitor_attendance")
+            .select("visitor_id")
+            .eq("gathering_id", gatheringId),
+          supabase
+            .from("members")
+            .select(MEMBER_COLUMNS)
+            .eq("life_group_id", lifeGroupId)
+            .eq("is_active", true),
+          supabase
+            .from("visitors")
+            .select(VISITOR_COLUMNS)
+            .eq("life_group_id", lifeGroupId)
+            .eq("status", "active"),
+        ]);
+      if (
+        memberAttendance.error ||
+        visitorAttendance.error ||
+        currentMemberResult.error ||
+        currentVisitorResult.error
+      ) throw serviceUnavailable();
+      const memberPresentIds = new Set(
+        memberAttendance.data.map((row) => row.member_id),
+      );
+      const visitorPresentIds = new Set(
+        visitorAttendance.data.map((row) => row.visitor_id),
+      );
+      const currentMembers = currentMemberResult.data;
       const currentIds = new Set(currentMembers.map((member) => member.id));
-      const historicalIds = [...presentIds].filter((id) => !currentIds.has(id));
+      const historicalIds = [...memberPresentIds].filter((id) => !currentIds.has(id));
       const historicalMembers = await loadMembers(historicalIds);
+      const currentVisitors = currentVisitorResult.data;
+      const currentVisitorIds = new Set(currentVisitors.map((visitor) => visitor.id));
+      const historicalVisitorIds = [...visitorPresentIds].filter(
+        (id) => !currentVisitorIds.has(id),
+      );
+      const historicalVisitors = await loadVisitors(historicalVisitorIds);
       return {
         members: await mapAttendanceMembers(
           [...currentMembers, ...historicalMembers],
           lifeGroupId,
-          presentIds,
+          memberPresentIds,
+        ),
+        visitors: await mapAttendanceVisitors(
+          [...currentVisitors, ...historicalVisitors],
+          lifeGroupId,
+          visitorPresentIds,
         ),
       };
     },
@@ -334,18 +433,18 @@ export function createSupabaseGatheringService({
       await getScopedGathering(actor, lifeGroupId, gatheringId);
       const { data: member, error: memberError } = await supabase
         .from("members")
-        .select("id, life_group_id")
+        .select("id, life_group_id, is_active")
         .eq("id", memberId)
         .maybeSingle();
       if (memberError) throw serviceUnavailable();
       if (!member) {
         throw new GatheringServiceError(404, "MEMBER_NOT_FOUND", "Member was not found.");
       }
-      if (member.life_group_id !== lifeGroupId) {
+      if (!member.is_active || member.life_group_id !== lifeGroupId) {
         throw new GatheringServiceError(
           422,
           "MEMBER_NOT_ELIGIBLE",
-          "Only Members currently assigned to this Life Group may be marked present.",
+          "Only active Members currently assigned to this Life Group may be marked present.",
         );
       }
       const insert: TablesInsert<"life_group_gathering_attendance"> = {
@@ -384,6 +483,69 @@ export function createSupabaseGatheringService({
         );
       }
       return { isPresent: false, memberId };
+    },
+
+    async addVisitorAttendance(actor, lifeGroupId, gatheringId, visitorId) {
+      await getScopedGathering(actor, lifeGroupId, gatheringId);
+      const { data: visitor, error: visitorError } = await supabase
+        .from("visitors")
+        .select("id, life_group_id, status")
+        .eq("id", visitorId)
+        .maybeSingle();
+      if (visitorError) throw serviceUnavailable();
+      if (!visitor) {
+        throw new GatheringServiceError(404, "VISITOR_NOT_FOUND", "Visitor was not found.");
+      }
+      if (visitor.status !== "active" || visitor.life_group_id !== lifeGroupId) {
+        throw new GatheringServiceError(
+          422,
+          "VISITOR_NOT_ELIGIBLE",
+          "Only active Visitors currently affiliated with this Life Group may be marked present.",
+        );
+      }
+      const insert: TablesInsert<"life_group_gathering_visitor_attendance"> = {
+        gathering_id: gatheringId,
+        visitor_id: visitorId,
+      };
+      const { error } = await supabase
+        .from("life_group_gathering_visitor_attendance")
+        .insert(insert);
+      if (error?.code === "23505") {
+        throw new GatheringServiceError(
+          409,
+          "ATTENDANCE_ALREADY_RECORDED",
+          "This Visitor is already marked present.",
+        );
+      }
+      if (error?.code === "23514") {
+        throw new GatheringServiceError(
+          422,
+          "VISITOR_NOT_ELIGIBLE",
+          "Only active Visitors currently affiliated with this Life Group may be marked present.",
+        );
+      }
+      if (error) throw serviceUnavailable();
+      return { isPresent: true, visitorId };
+    },
+
+    async removeVisitorAttendance(actor, lifeGroupId, gatheringId, visitorId) {
+      await getScopedGathering(actor, lifeGroupId, gatheringId);
+      const { data, error } = await supabase
+        .from("life_group_gathering_visitor_attendance")
+        .delete()
+        .eq("gathering_id", gatheringId)
+        .eq("visitor_id", visitorId)
+        .select("visitor_id")
+        .maybeSingle();
+      if (error) throw serviceUnavailable();
+      if (!data) {
+        throw new GatheringServiceError(
+          404,
+          "ATTENDANCE_NOT_FOUND",
+          "This Visitor is not marked present.",
+        );
+      }
+      return { isPresent: false, visitorId };
     },
   };
 }

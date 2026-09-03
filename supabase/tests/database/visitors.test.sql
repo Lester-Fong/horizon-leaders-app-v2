@@ -44,7 +44,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'anon',
-    'public.convert_visitor_to_member(uuid,uuid,text)',
+    'public.convert_visitor_to_member(uuid,uuid,uuid,text)',
     'execute'
   ),
   'anon cannot execute Visitor conversion'
@@ -52,7 +52,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.convert_visitor_to_member(uuid,uuid,text)',
+    'public.convert_visitor_to_member(uuid,uuid,uuid,text)',
     'execute'
   ),
   'authenticated cannot execute Visitor conversion'
@@ -60,7 +60,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.convert_visitor_to_member(uuid,uuid,text)',
+    'public.convert_visitor_to_member(uuid,uuid,uuid,text)',
     'execute'
   ),
   'service_role can execute the backend conversion boundary'
@@ -324,6 +324,7 @@ select is(
     select outcome
     from public.convert_visitor_to_member(
       '98888888-8888-4888-8888-888888888888',
+      null,
       '93333333-3333-4333-8333-333333333333',
       'duplicate-conversion-token'
     )
@@ -359,6 +360,7 @@ select is(
     select outcome
     from public.convert_visitor_to_member(
       '99999999-9999-4999-8999-999999999999',
+      null,
       '94444444-4444-4444-8444-444444444444',
       'inactive-group-token'
     )
@@ -385,6 +387,7 @@ begin
     perform *
     from public.convert_visitor_to_member(
       '90000000-0000-4000-8000-000000000001',
+      null,
       '93333333-3333-4333-8333-333333333333',
       ' '
     );
@@ -416,6 +419,7 @@ select is(
     select outcome
     from public.convert_visitor_to_member(
       '90000000-0000-4000-8000-000000000002',
+      null,
       '93333333-3333-4333-8333-333333333333',
       'successful-conversion-token'
     )
@@ -481,6 +485,7 @@ select is(
     select outcome
     from public.convert_visitor_to_member(
       '90000000-0000-4000-8000-000000000002',
+      null,
       '93333333-3333-4333-8333-333333333333',
       'second-conversion-token'
     )

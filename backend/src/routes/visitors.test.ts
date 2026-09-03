@@ -24,6 +24,7 @@ const visitor: Visitor = {
   firstName: "Mara",
   id: visitorId,
   lastName: "Reyes",
+  lifeGroup: null,
   phone: "0917 123 4567",
   status: "active",
   updatedAt: "2026-08-19T04:00:00.000Z",
@@ -59,6 +60,12 @@ function createVisitorService(): VisitorService {
     create: vi.fn(async () => visitor),
     getById: vi.fn(async () => visitor),
     list: vi.fn(async () => [visitor]),
+    setLifeGroup: vi.fn(async (_actor, _visitorId, lifeGroupId) => ({
+      ...visitor,
+      lifeGroup: lifeGroupId
+        ? { id: lifeGroupId, isActive: true, name: "North" }
+        : null,
+    })),
     update: vi.fn(async () => visitor),
   };
 }
@@ -75,8 +82,9 @@ describe("Visitor API", () => {
       request(app).post("/api/visitors").send({}),
       request(app).get(`/api/visitors/${visitorId}`),
       request(app).post(`/api/visitors/${visitorId}/convert`).send({ lifeGroupId: groupId }),
+      request(app).patch(`/api/visitors/${visitorId}/life-group`).send({ lifeGroupId: groupId }),
     ]);
-    expect(responses.map(({ status }) => status)).toEqual([401, 401, 401, 401]);
+    expect(responses.map(({ status }) => status)).toEqual([401, 401, 401, 401, 401]);
     expect(visitorService.list).not.toHaveBeenCalled();
   });
 
@@ -149,6 +157,35 @@ describe("Visitor API", () => {
     expect(controlled.status).toBe(400);
     expect(visitorService.convert).toHaveBeenCalledTimes(1);
     expect(visitorService.convert).toHaveBeenCalledWith(actors.leader, visitorId, groupId);
+  });
+
+  it("updates or clears current Life Group through the actor-scoped service", async () => {
+    const { app, visitorService } = createTestApp();
+    const assigned = await request(app)
+      .patch(`/api/visitors/${visitorId}/life-group`)
+      .set("Authorization", "Bearer leader-token")
+      .send({ lifeGroupId: groupId });
+    const unassigned = await request(app)
+      .patch(`/api/visitors/${visitorId}/life-group`)
+      .set("Authorization", "Bearer admin-token")
+      .send({ lifeGroupId: null });
+    const invalid = await request(app)
+      .patch(`/api/visitors/${visitorId}/life-group`)
+      .set("Authorization", "Bearer admin-token")
+      .send({ lifeGroupId: "bad" });
+    expect([assigned.status, unassigned.status, invalid.status]).toEqual([200, 200, 400]);
+    expect(visitorService.setLifeGroup).toHaveBeenNthCalledWith(1, actors.leader, visitorId, groupId);
+    expect(visitorService.setLifeGroup).toHaveBeenNthCalledWith(2, actors.admin, visitorId, null);
+  });
+
+  it("allows an assigned Visitor conversion request to omit Life Group override", async () => {
+    const { app, visitorService } = createTestApp();
+    const converted = await request(app)
+      .post(`/api/visitors/${visitorId}/convert`)
+      .set("Authorization", "Bearer admin-token")
+      .send({});
+    expect(converted.status).toBe(201);
+    expect(visitorService.convert).toHaveBeenCalledWith(actors.admin, visitorId, null);
   });
 
   it("returns stable duplicate and converted-state errors", async () => {

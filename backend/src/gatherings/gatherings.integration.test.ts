@@ -33,6 +33,7 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
   const createdUserIds: string[] = [];
   const createdLifeGroupIds: string[] = [];
   const createdMemberIds: string[] = [];
+  const createdVisitorIds: string[] = [];
   const createdGatheringIds: string[] = [];
 
   afterEach(async () => {
@@ -42,12 +43,25 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
         .delete()
         .in("gathering_id", createdGatheringIds);
       if (attendanceError) throw attendanceError;
+      const { error: visitorAttendanceError } = await adminClient
+        .from("life_group_gathering_visitor_attendance")
+        .delete()
+        .in("gathering_id", createdGatheringIds);
+      if (visitorAttendanceError) throw visitorAttendanceError;
       const { error } = await adminClient
         .from("life_group_gatherings")
         .delete()
         .in("id", createdGatheringIds);
       if (error) throw error;
       createdGatheringIds.length = 0;
+    }
+    if (createdVisitorIds.length > 0) {
+      const { error } = await adminClient
+        .from("visitors")
+        .delete()
+        .in("id", createdVisitorIds);
+      if (error) throw error;
+      createdVisitorIds.length = 0;
     }
     if (createdMemberIds.length > 0) {
       const { error } = await adminClient
@@ -118,6 +132,21 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
     return data.id;
   }
 
+  async function createVisitor(firstName: string, lifeGroupId: string | null) {
+    const { data, error } = await adminClient
+      .from("visitors")
+      .insert({
+        first_name: firstName,
+        last_name: "Gathering Visitor",
+        life_group_id: lifeGroupId,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    createdVisitorIds.push(data.id);
+    return data.id;
+  }
+
   function trackGathering(response: { body: { data?: { id?: string } } }) {
     const id = response.body.data?.id;
     if (id) createdGatheringIds.push(id);
@@ -133,6 +162,9 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
     const memberAId = await createMember("Ana", groupAId);
     const movedWithoutAttendanceId = await createMember("Mia", groupAId);
     const memberBId = await createMember("Ben", groupBId);
+    const visitorAId = await createVisitor("Vera", groupAId);
+    const visitorBId = await createVisitor("Vince", groupBId);
+    const unassignedVisitorId = await createVisitor("Una", null);
 
     const actors: Record<string, HorizonActor> = {
       "admin-token": {
@@ -256,6 +288,19 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
     expect(wrongGroup.status).toBe(422);
     expect(wrongGroup.body.error.code).toBe("MEMBER_NOT_ELIGIBLE");
 
+    const visitorAttendanceAPath = `${groupAPath}/${gatheringAId}/visitor-attendance`;
+    const visitorAdded = await asActor("leader-a-token", "post", visitorAttendanceAPath).send({ visitorId: visitorAId });
+    expect(visitorAdded.status).toBe(201);
+    const otherVisitor = await asActor("admin-token", "post", visitorAttendanceAPath).send({ visitorId: visitorBId });
+    const unassignedVisitor = await asActor("admin-token", "post", visitorAttendanceAPath).send({ visitorId: unassignedVisitorId });
+    expect([otherVisitor.status, unassignedVisitor.status]).toEqual([422, 422]);
+    const rosterWithVisitor = await asActor("leader-a-token", "get", attendanceAPath);
+    expect(rosterWithVisitor.body.data.visitors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: visitorAId, isEligible: true, isPresent: true, status: "active" }),
+    ]));
+    const directoryWithVisitor = await asActor("admin-token", "get", groupAPath);
+    expect(directoryWithVisitor.body.data.gatherings[0].attendanceCount).toBe(2);
+
     const leaderBAdd = await asActor("leader-b-token", "post", attendanceBPath).send({
       memberId: memberBId,
     });
@@ -300,6 +345,41 @@ describeWithLocalSupabase("Gathering API with local Supabase", () => {
       attendanceAPath,
     ).send({ memberId: movedWithoutAttendanceId });
     expect(movedNewAttendance.status).toBe(422);
+
+    const { error: unassignVisitorError } = await adminClient
+      .from("visitors")
+      .update({ life_group_id: null })
+      .eq("id", visitorAId);
+    if (unassignVisitorError) throw unassignVisitorError;
+    const historicalVisitorAfterUnassign = await asActor("leader-a-token", "get", attendanceAPath);
+    expect(historicalVisitorAfterUnassign.body.data.visitors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currentLifeGroup: null, id: visitorAId, isEligible: false, isPresent: true }),
+    ]));
+
+    const { error: moveVisitorError } = await adminClient
+      .from("visitors")
+      .update({ life_group_id: groupBId })
+      .eq("id", visitorAId);
+    if (moveVisitorError) throw moveVisitorError;
+    const historicalVisitorAfterMove = await asActor("leader-a-token", "get", attendanceAPath);
+    expect(historicalVisitorAfterMove.body.data.visitors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currentLifeGroup: expect.objectContaining({ id: groupBId }), id: visitorAId, isEligible: false, isPresent: true }),
+    ]));
+
+    const convertedMemberId = await createMember("Vera", groupAId);
+    const { error: convertVisitorError } = await adminClient
+      .from("visitors")
+      .update({ converted_member_id: convertedMemberId, status: "converted" })
+      .eq("id", visitorAId);
+    if (convertVisitorError) throw convertVisitorError;
+    const historicalVisitorAfterConversion = await asActor("leader-a-token", "get", attendanceAPath);
+    expect(historicalVisitorAfterConversion.body.data.visitors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: visitorAId, isEligible: false, isPresent: true, status: "converted" }),
+    ]));
+    const removedHistoricalVisitor = await asActor("leader-a-token", "delete", `${visitorAttendanceAPath}/${visitorAId}`);
+    expect(removedHistoricalVisitor.status).toBe(200);
+    const convertedVisitorNewPresence = await asActor("admin-token", "post", visitorAttendanceAPath).send({ visitorId: visitorAId });
+    expect(convertedVisitorNewPresence.status).toBe(422);
     const removedHistorical = await asActor(
       "leader-a-token",
       "delete",

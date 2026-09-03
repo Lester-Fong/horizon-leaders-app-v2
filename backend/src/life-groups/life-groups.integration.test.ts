@@ -32,8 +32,20 @@ describeWithLocalSupabase("Life Group API with local Supabase", () => {
   );
   const createdUserIds: string[] = [];
   const createdLifeGroupIds: string[] = [];
+  const createdMemberIds: string[] = [];
+  const createdVisitorIds: string[] = [];
 
   afterEach(async () => {
+    if (createdVisitorIds.length > 0) {
+      const { error } = await adminClient.from("visitors").delete().in("id", createdVisitorIds);
+      if (error) throw error;
+      createdVisitorIds.length = 0;
+    }
+    if (createdMemberIds.length > 0) {
+      const { error } = await adminClient.from("members").delete().in("id", createdMemberIds);
+      if (error) throw error;
+      createdMemberIds.length = 0;
+    }
     if (createdLifeGroupIds.length > 0) {
       const { error } = await adminClient
         .from("life_groups")
@@ -220,5 +232,52 @@ describeWithLocalSupabase("Life Group API with local Supabase", () => {
     expect(options.body.data).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: adminId })]),
     );
+  });
+
+  it("returns active Members and active Visitors with distinct person types", async () => {
+    const adminId = await createProfile("Roster Admin", "admin");
+    const leaderId = await createProfile("Roster Leader");
+    const { data: lifeGroup, error: groupError } = await adminClient
+      .from("life_groups")
+      .insert({ leader_profile_id: leaderId, name: "Roster Group" })
+      .select("id")
+      .single();
+    if (groupError) throw groupError;
+    createdLifeGroupIds.push(lifeGroup.id);
+    const { data: member, error: memberError } = await adminClient
+      .from("members")
+      .insert({ first_name: "Mina", last_name: "Roster", life_group_id: lifeGroup.id, qr_token: randomUUID() })
+      .select("id")
+      .single();
+    if (memberError) throw memberError;
+    createdMemberIds.push(member.id);
+    const { data: visitors, error: visitorError } = await adminClient
+      .from("visitors")
+      .insert([
+        { first_name: "Vera", last_name: "Roster", life_group_id: lifeGroup.id, status: "active" },
+        { converted_member_id: member.id, first_name: "Mina", last_name: "Roster", life_group_id: lifeGroup.id, status: "converted" },
+      ])
+      .select("id")
+    if (visitorError) throw visitorError;
+    createdVisitorIds.push(...visitors.map((visitor) => visitor.id));
+
+    const actors: Record<string, HorizonActor> = {
+      "admin-token": { id: adminId, isActive: true, name: "Roster Admin", role: "admin" },
+      "leader-token": { id: leaderId, isActive: true, name: "Roster Leader", role: "leader" },
+    };
+    const authService: AuthService = { authenticate: async (token) => ({ actor: actors[token]!, ok: true }) };
+    const lifeGroupService = createSupabaseLifeGroupService({ serviceRoleKey: integrationServiceRoleKey, supabaseUrl: integrationSupabaseUrl });
+    const app = createApp({ authService, lifeGroupService });
+    const rosterPath = `/api/life-groups/${lifeGroup.id}/roster`;
+    const [adminRoster, leaderRoster] = await Promise.all([
+      request(app).get(rosterPath).set("Authorization", "Bearer admin-token"),
+      request(app).get(rosterPath).set("Authorization", "Bearer leader-token"),
+    ]);
+    expect([adminRoster.status, leaderRoster.status]).toEqual([200, 200]);
+    expect(adminRoster.body.data.people).toEqual(expect.arrayContaining([
+      expect.objectContaining({ firstName: "Mina", personType: "member" }),
+      expect.objectContaining({ firstName: "Vera", personType: "visitor" }),
+    ]));
+    expect(adminRoster.body.data.people).toHaveLength(2);
   });
 });

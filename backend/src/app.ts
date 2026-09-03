@@ -70,6 +70,7 @@ const unavailableEventService: EventService = {
 const unavailableLifeGroupService: LifeGroupService = {
   create: async () => unavailable(),
   getById: async () => unavailable(),
+  getRoster: async () => unavailable(),
   list: async () => unavailable(),
   listLeaderOptions: async () => unavailable(),
   setActive: async () => unavailable(),
@@ -84,11 +85,13 @@ const unavailableFollowUpService: FollowUpService = {
 
 const unavailableGatheringService: GatheringService = {
   addAttendance: async () => unavailableGathering(),
+  addVisitorAttendance: async () => unavailableGathering(),
   create: async () => unavailableGathering(),
   getAttendance: async () => unavailableGathering(),
   getById: async () => unavailableGathering(),
   list: async () => unavailableGathering(),
   removeAttendance: async () => unavailableGathering(),
+  removeVisitorAttendance: async () => unavailableGathering(),
   update: async () => unavailableGathering(),
 };
 
@@ -128,6 +131,7 @@ const unavailableVisitorService: VisitorService = {
   create: async () => unavailableVisitor(),
   getById: async () => unavailableVisitor(),
   list: async () => unavailableVisitor(),
+  setLifeGroup: async () => unavailableVisitor(),
   update: async () => unavailableVisitor(),
 };
 

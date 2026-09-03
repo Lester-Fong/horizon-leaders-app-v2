@@ -5,6 +5,12 @@ import type { Enums } from "../types/database.types.js";
 export type VisitorStatus = Enums<"visitor_status">;
 export type VisitorListStatus = VisitorStatus | "all";
 
+export interface VisitorLifeGroup {
+  id: string;
+  isActive: boolean;
+  name: string;
+}
+
 export interface Visitor {
   convertedMemberId: string | null;
   createdAt: string;
@@ -12,6 +18,7 @@ export interface Visitor {
   firstName: string;
   id: string;
   lastName: string;
+  lifeGroup: VisitorLifeGroup | null;
   phone: string | null;
   status: VisitorStatus;
   updatedAt: string;
@@ -41,6 +48,10 @@ export interface VisitorConversionResult {
   visitor: Visitor;
 }
 
+export interface VisitorLifeGroupUpdateResult {
+  visitor: Visitor;
+}
+
 export type VisitorErrorCode =
   | "DUPLICATE_MEMBER_EMAIL"
   | "DUPLICATE_MEMBER_PHONE"
@@ -48,7 +59,9 @@ export type VisitorErrorCode =
   | "DUPLICATE_VISITOR_PHONE"
   | "INACTIVE_LIFE_GROUP"
   | "LIFE_GROUP_NOT_FOUND"
+  | "LIFE_GROUP_REQUIRED"
   | "VISITOR_NOT_ACTIVE"
+  | "VISITOR_CHANGED"
   | "VISITOR_NOT_FOUND"
   | "VISITOR_SCOPE_FORBIDDEN"
   | "VISITOR_SERVICE_UNAVAILABLE";
@@ -73,11 +86,16 @@ export interface VisitorService {
   convert(
     actor: HorizonActor,
     visitorId: string,
-    lifeGroupId: string,
+    lifeGroupId: string | null,
   ): Promise<VisitorConversionResult>;
   create(input: VisitorInput): Promise<Visitor>;
   getById(actor: HorizonActor, visitorId: string): Promise<Visitor>;
   list(actor: HorizonActor, options: ListVisitorsOptions): Promise<Visitor[]>;
+  setLifeGroup(
+    actor: HorizonActor,
+    visitorId: string,
+    lifeGroupId: string | null,
+  ): Promise<Visitor>;
   update(
     actor: HorizonActor,
     visitorId: string,

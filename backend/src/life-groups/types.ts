@@ -1,3 +1,5 @@
+import type { HorizonActor } from "../auth/types.js";
+
 export interface LifeGroupLeader {
   id: string;
   isActive: boolean;
@@ -18,6 +20,20 @@ export interface AssignedLifeGroupSummary {
   id: string;
   isActive: boolean;
   name: string;
+}
+
+export interface LifeGroupRosterPerson {
+  email: string | null;
+  firstName: string;
+  id: string;
+  lastName: string;
+  personType: "member" | "visitor";
+  phone: string | null;
+}
+
+export interface LifeGroupRoster {
+  lifeGroup: LifeGroup;
+  people: LifeGroupRosterPerson[];
 }
 
 export interface LeaderOption extends LifeGroupLeader {
@@ -63,6 +79,7 @@ export class LifeGroupServiceError extends Error {
 export interface LifeGroupService {
   create(input: CreateLifeGroupInput): Promise<LifeGroup>;
   getById(lifeGroupId: string): Promise<LifeGroup>;
+  getRoster(actor: HorizonActor, lifeGroupId: string): Promise<LifeGroupRoster>;
   list(options: { includeInactive: boolean }): Promise<LifeGroup[]>;
   listLeaderOptions(): Promise<LeaderOption[]>;
   setActive(lifeGroupId: string, isActive: boolean): Promise<LifeGroup>;

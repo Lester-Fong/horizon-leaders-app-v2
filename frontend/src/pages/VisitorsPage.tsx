@@ -5,6 +5,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Users,
   UserRoundPlus,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
@@ -29,6 +30,7 @@ import {
   getLifeGroups,
   getVisitor,
   getVisitors,
+  setVisitorLifeGroup,
   updateVisitor,
   type LifeGroup,
   type Visitor,
@@ -77,6 +79,10 @@ export function VisitorsPage() {
   const [conversionGroupId, setConversionGroupId] = useState('')
   const [conversionError, setConversionError] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
+  const [affiliationTarget, setAffiliationTarget] = useState<Visitor | null>(null)
+  const [affiliationGroupId, setAffiliationGroupId] = useState('')
+  const [affiliationError, setAffiliationError] = useState<string | null>(null)
+  const [isAffiliationSaving, setIsAffiliationSaving] = useState(false)
 
   const activeLifeGroups = useMemo(
     () => lifeGroups.filter((lifeGroup) => lifeGroup.isActive),
@@ -86,7 +92,21 @@ export function VisitorsPage() {
     () => lifeGroups.find((lifeGroup) => lifeGroup.leader.id === actor?.id) ?? null,
     [actor?.id, lifeGroups],
   )
-  const canConvert = isAdmin ? activeLifeGroups.length > 0 : Boolean(ownLifeGroup?.isActive)
+  function canConvertVisitor(visitor: Visitor) {
+    if (visitor.lifeGroup) {
+      return visitor.lifeGroup.isActive &&
+        (isAdmin || visitor.lifeGroup.id === ownLifeGroup?.id)
+    }
+    return isAdmin ? activeLifeGroups.length > 0 : Boolean(ownLifeGroup?.isActive)
+  }
+
+  function canManageAffiliation(visitor: Visitor) {
+    return visitor.status === 'active' && (
+      isAdmin ||
+      visitor.lifeGroup === null ||
+      visitor.lifeGroup.id === ownLifeGroup?.id
+    )
+  }
 
   const loadDirectory = useCallback(async () => {
     setIsLoading(true)
@@ -140,19 +160,28 @@ export function VisitorsPage() {
   }
 
   function openConversion(visitor: Visitor) {
-    const initialGroupId = isAdmin ? activeLifeGroups[0]?.id ?? '' : ownLifeGroup?.id ?? ''
+    const initialGroupId = visitor.lifeGroup?.id ?? (
+      isAdmin ? activeLifeGroups[0]?.id ?? '' : ownLifeGroup?.id ?? ''
+    )
     setConversionTarget(visitor)
     setConversionGroupId(initialGroupId)
     setConversionError(null)
   }
 
+  function openAffiliation(visitor: Visitor) {
+    setAffiliationTarget(visitor)
+    setAffiliationGroupId(visitor.lifeGroup?.id ?? '')
+    setAffiliationError(null)
+  }
+
   function getRowActions(visitor: Visitor): RowAction[] {
     const actions: RowAction[] = [{ icon: Eye, label: 'View Visitor details', onSelect: () => void openDetails(visitor) }]
     if (visitor.status === 'active') {
-      actions.push(
-        { icon: Pencil, label: 'Edit Visitor', onSelect: () => setFormContext({ mode: 'edit', visitor }) },
-        { disabled: !canConvert, icon: ArrowRight, label: 'Convert to Member', onSelect: () => openConversion(visitor) },
-      )
+      actions.push({ icon: Pencil, label: 'Edit Visitor', onSelect: () => setFormContext({ mode: 'edit', visitor }) })
+      if (canManageAffiliation(visitor)) {
+        actions.push({ icon: Users, label: 'Manage Life Group', onSelect: () => openAffiliation(visitor) })
+      }
+      actions.push({ disabled: !canConvertVisitor(visitor), icon: ArrowRight, label: 'Convert to Member', onSelect: () => openConversion(visitor) })
     }
     return actions
   }
@@ -172,14 +201,18 @@ export function VisitorsPage() {
   }
 
   async function handleConversion() {
-    if (!conversionTarget || !conversionGroupId) {
+    if (!conversionTarget || (!conversionTarget.lifeGroup && !conversionGroupId)) {
       setConversionError('Select an active Life Group for the new Member.')
       return
     }
     setIsConverting(true)
     setConversionError(null)
     try {
-      const result = await convertVisitor(await getAccessToken(), conversionTarget.id, conversionGroupId)
+      const result = await convertVisitor(
+        await getAccessToken(),
+        conversionTarget.id,
+        conversionTarget.lifeGroup ? undefined : conversionGroupId,
+      )
       setNotice(`${result.visitor.firstName} ${result.visitor.lastName} was converted to a Member in ${result.member.lifeGroup.name}.`)
       setConversionTarget(null)
       setDetailVisitorId(null)
@@ -189,6 +222,39 @@ export function VisitorsPage() {
       setConversionError(getErrorMessage(error))
     } finally {
       setIsConverting(false)
+    }
+  }
+
+  async function handleAffiliation() {
+    if (!affiliationTarget) return
+    const nextLifeGroupId = isAdmin
+      ? affiliationGroupId || null
+      : affiliationTarget.lifeGroup
+        ? null
+        : ownLifeGroup?.id ?? null
+    if (!isAdmin && !nextLifeGroupId && !affiliationTarget.lifeGroup) {
+      setAffiliationError('Your active Life Group is required before assigning this Visitor.')
+      return
+    }
+    setIsAffiliationSaving(true)
+    setAffiliationError(null)
+    try {
+      const updated = await setVisitorLifeGroup(
+        await getAccessToken(),
+        affiliationTarget.id,
+        nextLifeGroupId,
+      )
+      setNotice(
+        updated.lifeGroup
+          ? `${updated.firstName} ${updated.lastName} is now affiliated with ${updated.lifeGroup.name}.`
+          : `${updated.firstName} ${updated.lastName} is now unassigned.`,
+      )
+      setAffiliationTarget(null)
+      await loadDirectory()
+    } catch (error) {
+      setAffiliationError(getErrorMessage(error))
+    } finally {
+      setIsAffiliationSaving(false)
     }
   }
 
@@ -216,9 +282,9 @@ export function VisitorsPage() {
 
       {notice && <FeedbackBanner tone="success">{notice}</FeedbackBanner>}
       {loadError && visitors.length > 0 && <FeedbackBanner tone="error">{loadError}</FeedbackBanner>}
-      {!canConvert && !loadError && (
+      {!isAdmin && !ownLifeGroup?.isActive && !loadError && (
         <FeedbackBanner tone="warning" title="An active Life Group is required for conversion">
-          {isAdmin ? 'Create or reactivate a Life Group before converting a Visitor.' : 'Your assigned Life Group must be active before you can convert a Visitor.'}
+          Your assigned Life Group must be active before you can assign or convert an unassigned Visitor.
         </FeedbackBanner>
       )}
 
@@ -264,7 +330,7 @@ export function VisitorsPage() {
         />
       ) : (
         <ResponsiveTable caption="Authorized Visitor directory" tableClassName="horizon-table--visitors">
-          <thead><tr><th scope="col">Visitor</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col" className="w-16"><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th scope="col">Visitor</th><th scope="col">Contact</th><th scope="col">Life Group</th><th scope="col">Status</th><th scope="col" className="w-16"><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {visitors.map((visitor) => (
               <tr key={visitor.id}>
@@ -277,6 +343,11 @@ export function VisitorsPage() {
                   <span className="hm-table-mobile-label">Contact</span>
                   <p className="text-sm text-ink">{visitor.phone ?? 'No phone'}</p>
                   <p className="mt-1 break-all text-xs text-muted">{visitor.email ?? 'No email'}</p>
+                </td>
+                <td className="visitor-cell-status">
+                  <span className="hm-table-mobile-label">Life Group</span>
+                  <p className="text-sm font-medium text-ink">{visitor.lifeGroup?.name ?? 'Unassigned'}</p>
+                  {visitor.lifeGroup && !visitor.lifeGroup.isActive && <p className="mt-1 text-xs text-muted">Archived group</p>}
                 </td>
                 <td className="visitor-cell-status">
                   <span className="hm-table-mobile-label">Status</span>
@@ -321,15 +392,56 @@ export function VisitorsPage() {
             <dl className="mt-3 grid sm:grid-cols-2 sm:gap-x-6">
               <DetailItem label="Phone" value={detailVisitor.phone ?? 'Not recorded'} />
               <DetailItem label="Email" value={detailVisitor.email ?? 'Not recorded'} />
+              <DetailItem label="Life Group" value={detailVisitor.lifeGroup?.name ?? 'Unassigned'} />
               {detailVisitor.status === 'converted' && <DetailItem label="Conversion result" value="Linked Member record preserved" />}
             </dl>
             <div className="mt-5 flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
               <Button variant="secondary" onClick={closeDetails}>Close</Button>
               {detailVisitor.status === 'active' && <Button variant="secondary" onClick={() => { closeDetails(); setFormContext({ mode: 'edit', visitor: detailVisitor }) }}><Pencil aria-hidden="true" className="size-4" />Edit Visitor</Button>}
-              {detailVisitor.status === 'active' && <Button disabled={!canConvert} onClick={() => { closeDetails(); openConversion(detailVisitor) }}><ArrowRight aria-hidden="true" className="size-4" />Convert</Button>}
+              {detailVisitor.status === 'active' && canManageAffiliation(detailVisitor) && <Button variant="secondary" onClick={() => { closeDetails(); openAffiliation(detailVisitor) }}><Users aria-hidden="true" className="size-4" />Life Group</Button>}
+              {detailVisitor.status === 'active' && <Button disabled={!canConvertVisitor(detailVisitor)} onClick={() => { closeDetails(); openConversion(detailVisitor) }}><ArrowRight aria-hidden="true" className="size-4" />Convert</Button>}
             </div>
           </>
         ) : null}
+      </Modal>
+
+      <Modal
+        className="max-w-lg"
+        isOpen={Boolean(affiliationTarget)}
+        onClose={() => setAffiliationTarget(null)}
+        preventClose={isAffiliationSaving}
+        title="Manage Visitor Life Group"
+        description={affiliationTarget ? `Update ${affiliationTarget.firstName} ${affiliationTarget.lastName}'s current Visitor affiliation. This does not make them a Member.` : undefined}
+      >
+        {affiliationError && <FeedbackBanner className="mb-5" tone="error">{affiliationError}</FeedbackBanner>}
+        {affiliationTarget && (
+          <div className="space-y-5">
+            {isAdmin ? (
+              <FormField id="visitor-affiliation-group" label="Life Group" description="Choose an active Life Group, or leave unassigned.">
+                <Select id="visitor-affiliation-group" data-modal-autofocus value={affiliationGroupId} disabled={isAffiliationSaving} onChange={(event) => setAffiliationGroupId(event.target.value)}>
+                  <option value="">Unassigned</option>
+                  {activeLifeGroups.map((lifeGroup) => <option key={lifeGroup.id} value={lifeGroup.id}>{lifeGroup.name}</option>)}
+                </Select>
+              </FormField>
+            ) : (
+              <div className="border-y border-line py-4" tabIndex={-1} data-modal-autofocus>
+                <p className="hm-label">Approved change</p>
+                <p className="mt-2 text-sm font-medium text-ink">
+                  {affiliationTarget.lifeGroup
+                    ? `Unassign from ${affiliationTarget.lifeGroup.name}`
+                    : `Assign to ${ownLifeGroup?.name ?? 'your Life Group'}`}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted">Leaders cannot move Visitors between groups or take a Visitor from another group.</p>
+              </div>
+            )}
+            <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
+              <Button variant="secondary" disabled={isAffiliationSaving} onClick={() => setAffiliationTarget(null)}>Cancel</Button>
+              <Button isLoading={isAffiliationSaving} onClick={() => void handleAffiliation()}>
+                {isAdmin ? 'Save affiliation' : affiliationTarget.lifeGroup ? 'Unassign Visitor' : 'Assign Visitor'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal
@@ -348,12 +460,20 @@ export function VisitorsPage() {
               <p className="mt-2 text-sm font-medium text-ink">{conversionTarget.firstName} {conversionTarget.lastName}</p>
               <p className="mt-1 text-sm text-muted">{conversionTarget.phone ?? 'No phone'} · {conversionTarget.email ?? 'No email'}</p>
             </div>
-            <FormField id="visitor-conversion-group" label="Life Group" required description={isAdmin ? 'Choose any current active Life Group.' : 'Your assigned Life Group is shown and cannot be changed.'}>
-              <Select id="visitor-conversion-group" data-modal-autofocus value={conversionGroupId} disabled={isConverting || !isAdmin} onChange={(event) => setConversionGroupId(event.target.value)}>
-                {isAdmin && <option value="">Select an active Life Group</option>}
-                {(isAdmin ? activeLifeGroups : ownLifeGroup ? [ownLifeGroup] : []).map((lifeGroup) => <option key={lifeGroup.id} value={lifeGroup.id}>{lifeGroup.name}</option>)}
-              </Select>
-            </FormField>
+            {conversionTarget.lifeGroup ? (
+              <div className="border-y border-line py-4" tabIndex={-1} data-modal-autofocus>
+                <p className="hm-label">Inherited Life Group</p>
+                <p className="mt-2 text-sm font-medium text-ink">{conversionTarget.lifeGroup.name}</p>
+                <p className="mt-1 text-sm leading-6 text-muted">The new Member inherits the Visitor's existing pastoral affiliation. It cannot be changed during conversion.</p>
+              </div>
+            ) : (
+              <FormField id="visitor-conversion-group" label="Life Group" required description={isAdmin ? 'Choose any current active Life Group.' : 'Your assigned Life Group is shown and cannot be changed.'}>
+                <Select id="visitor-conversion-group" data-modal-autofocus value={conversionGroupId} disabled={isConverting || !isAdmin} onChange={(event) => setConversionGroupId(event.target.value)}>
+                  {isAdmin && <option value="">Select an active Life Group</option>}
+                  {(isAdmin ? activeLifeGroups : ownLifeGroup ? [ownLifeGroup] : []).map((lifeGroup) => <option key={lifeGroup.id} value={lifeGroup.id}>{lifeGroup.name}</option>)}
+                </Select>
+              </FormField>
+            )}
             <p className="text-sm leading-6 text-muted">Conversion is one-way. Horizon creates the permanent QR token on the server; this process never reuses or overwrites an existing Member.</p>
             <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
               <Button variant="secondary" disabled={isConverting} onClick={() => setConversionTarget(null)}>Cancel</Button>

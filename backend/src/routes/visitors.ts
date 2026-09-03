@@ -19,6 +19,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VISITOR_FIELDS = new Set(["email", "firstName", "lastName", "phone"]);
 const CONVERSION_FIELDS = new Set(["lifeGroupId"]);
+const LIFE_GROUP_FIELDS = new Set(["lifeGroupId"]);
 
 function sendError(
   response: Response<ApiErrorBody>,
@@ -242,15 +243,54 @@ export function createVisitorsRouter(
         );
         return;
       }
-      const lifeGroupId = readUuid(request.body.lifeGroupId);
-      if (!lifeGroupId) {
-        sendError(response, 400, "INVALID_REQUEST", "Life Group ID must be a valid UUID.");
-        return;
+      let lifeGroupId: string | null = null;
+      if (hasOwn(request.body, "lifeGroupId")) {
+        const parsedLifeGroupId = readUuid(request.body.lifeGroupId);
+        if (!parsedLifeGroupId) {
+          sendError(response, 400, "INVALID_REQUEST", "Life Group ID must be a valid UUID when supplied.");
+          return;
+        }
+        lifeGroupId = parsedLifeGroupId;
       }
       await handleRequest(
         response,
         () => visitorService.convert(request.actor!, visitorId, lifeGroupId),
         201,
+      );
+    },
+  );
+
+  router.patch(
+    "/visitors/:visitorId/life-group",
+    authenticated,
+    async (request, response) => {
+      const visitorId = readUuid(request.params.visitorId);
+      if (
+        !visitorId ||
+        !request.actor ||
+        !isRecord(request.body) ||
+        hasUnknownFields(isRecord(request.body) ? request.body : {}, LIFE_GROUP_FIELDS) ||
+        !hasOwn(isRecord(request.body) ? request.body : {}, "lifeGroupId")
+      ) {
+        sendError(
+          response,
+          400,
+          "INVALID_REQUEST",
+          "Provide a valid Visitor and Life Group assignment.",
+        );
+        return;
+      }
+      let lifeGroupId: string | null = null;
+      if (request.body.lifeGroupId !== null) {
+        const parsedLifeGroupId = readUuid(request.body.lifeGroupId);
+        if (!parsedLifeGroupId) {
+          sendError(response, 400, "INVALID_REQUEST", "Life Group ID must be a valid UUID or null.");
+          return;
+        }
+        lifeGroupId = parsedLifeGroupId;
+      }
+      await handleRequest(response, () =>
+        visitorService.setLifeGroup(request.actor!, visitorId, lifeGroupId),
       );
     },
   );

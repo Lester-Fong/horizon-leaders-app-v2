@@ -209,6 +209,36 @@ export type Database = {
           },
         ]
       }
+      life_group_gathering_visitor_attendance: {
+        Row: {
+          gathering_id: string
+          visitor_id: string
+        }
+        Insert: {
+          gathering_id: string
+          visitor_id: string
+        }
+        Update: {
+          gathering_id?: string
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "life_group_gathering_visitor_attendance_gathering_id_fkey"
+            columns: ["gathering_id"]
+            isOneToOne: false
+            referencedRelation: "life_group_gatherings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "life_group_gathering_visitor_attendance_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       life_group_gatherings: {
         Row: {
           created_at: string
@@ -565,6 +595,7 @@ export type Database = {
           first_name: string
           id: string
           last_name: string
+          life_group_id: string | null
           normalized_email: string | null
           normalized_phone: string | null
           phone: string | null
@@ -578,6 +609,7 @@ export type Database = {
           first_name: string
           id?: string
           last_name: string
+          life_group_id?: string | null
           normalized_email?: string | null
           normalized_phone?: string | null
           phone?: string | null
@@ -591,6 +623,7 @@ export type Database = {
           first_name?: string
           id?: string
           last_name?: string
+          life_group_id?: string | null
           normalized_email?: string | null
           normalized_phone?: string | null
           phone?: string | null
@@ -603,6 +636,13 @@ export type Database = {
             columns: ["converted_member_id"]
             isOneToOne: true
             referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visitors_life_group_id_fkey"
+            columns: ["life_group_id"]
+            isOneToOne: false
+            referencedRelation: "life_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -632,7 +672,8 @@ export type Database = {
       }
       convert_visitor_to_member: {
         Args: {
-          p_life_group_id: string
+          p_expected_life_group_id: string | null
+          p_life_group_id: string | null
           p_qr_token: string
           p_visitor_id: string
         }
@@ -642,6 +683,14 @@ export type Database = {
           created_member_id: string
           outcome: string
         }[]
+      }
+      set_visitor_life_group: {
+        Args: {
+          p_expected_life_group_id: string | null
+          p_life_group_id: string | null
+          p_visitor_id: string
+        }
+        Returns: string
       }
       create_follow_up_if_absent: {
         Args: {
@@ -859,4 +908,3 @@ export const Constants = {
     },
   },
 } as const
-

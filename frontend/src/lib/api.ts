@@ -37,6 +37,20 @@ export interface LifeGroupInput {
   name: string
 }
 
+export interface LifeGroupRosterPerson {
+  email: string | null
+  firstName: string
+  id: string
+  lastName: string
+  personType: 'member' | 'visitor'
+  phone: string | null
+}
+
+export interface LifeGroupRoster {
+  lifeGroup: LifeGroup
+  people: LifeGroupRosterPerson[]
+}
+
 export type MemberGender = 'male' | 'female'
 
 export interface MemberLifeGroup {
@@ -161,11 +175,29 @@ export interface GatheringAttendanceMember {
 
 export interface GatheringAttendanceRoster {
   members: GatheringAttendanceMember[]
+  visitors: GatheringAttendanceVisitor[]
+}
+
+export interface GatheringAttendanceVisitor {
+  currentLifeGroup: { id: string; name: string } | null
+  email: string | null
+  firstName: string
+  id: string
+  isEligible: boolean
+  isPresent: boolean
+  lastName: string
+  phone: string | null
+  status: VisitorStatus
 }
 
 export interface AttendanceMutationResult {
   isPresent: boolean
   memberId: string
+}
+
+export interface VisitorAttendanceMutationResult {
+  isPresent: boolean
+  visitorId: string
 }
 
 export type SundayServiceStatus = 'open' | 'closed'
@@ -274,6 +306,7 @@ export interface Visitor {
   firstName: string
   id: string
   lastName: string
+  lifeGroup: MemberLifeGroup | null
   phone: string | null
   status: VisitorStatus
   updatedAt: string
@@ -373,6 +406,27 @@ function isLifeGroup(value: unknown): value is LifeGroup {
     isLifeGroupLeader(value.leader) &&
     typeof value.name === 'string' &&
     typeof value.updatedAt === 'string'
+  )
+}
+
+function isLifeGroupRosterPerson(value: unknown): value is LifeGroupRosterPerson {
+  return (
+    isRecord(value) &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.lastName === 'string' &&
+    (value.personType === 'member' || value.personType === 'visitor') &&
+    (typeof value.phone === 'string' || value.phone === null)
+  )
+}
+
+function isLifeGroupRoster(value: unknown): value is LifeGroupRoster {
+  return (
+    isRecord(value) &&
+    isLifeGroup(value.lifeGroup) &&
+    Array.isArray(value.people) &&
+    value.people.every(isLifeGroupRosterPerson)
   )
 }
 
@@ -509,7 +563,30 @@ function isGatheringAttendanceRoster(
   return (
     isRecord(value) &&
     Array.isArray(value.members) &&
-    value.members.every(isGatheringAttendanceMember)
+    value.members.every(isGatheringAttendanceMember) &&
+    Array.isArray(value.visitors) &&
+    value.visitors.every(isGatheringAttendanceVisitor)
+  )
+}
+
+function isGatheringAttendanceVisitor(
+  value: unknown,
+): value is GatheringAttendanceVisitor {
+  return (
+    isRecord(value) &&
+    (value.currentLifeGroup === null || (
+      isRecord(value.currentLifeGroup) &&
+      typeof value.currentLifeGroup.id === 'string' &&
+      typeof value.currentLifeGroup.name === 'string'
+    )) &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.firstName === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.isEligible === 'boolean' &&
+    typeof value.isPresent === 'boolean' &&
+    typeof value.lastName === 'string' &&
+    (typeof value.phone === 'string' || value.phone === null) &&
+    (value.status === 'active' || value.status === 'converted')
   )
 }
 
@@ -520,6 +597,16 @@ function isAttendanceMutationResult(
     isRecord(value) &&
     typeof value.isPresent === 'boolean' &&
     typeof value.memberId === 'string'
+  )
+}
+
+function isVisitorAttendanceMutationResult(
+  value: unknown,
+): value is VisitorAttendanceMutationResult {
+  return (
+    isRecord(value) &&
+    typeof value.isPresent === 'boolean' &&
+    typeof value.visitorId === 'string'
   )
 }
 
@@ -637,6 +724,7 @@ function isVisitor(value: unknown): value is Visitor {
     typeof value.firstName === 'string' &&
     typeof value.id === 'string' &&
     typeof value.lastName === 'string' &&
+    (value.lifeGroup === null || isMemberLifeGroup(value.lifeGroup)) &&
     (typeof value.phone === 'string' || value.phone === null) &&
     (value.status === 'active' || value.status === 'converted') &&
     typeof value.updatedAt === 'string'
@@ -801,6 +889,14 @@ const isVisitorRegistrationResult = (
 
 export function getLifeGroups(accessToken: string) {
   return requestApi(accessToken, '/life-groups', isLifeGroupList)
+}
+
+export function getLifeGroupRoster(accessToken: string, lifeGroupId: string) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/roster`,
+    isLifeGroupRoster,
+  )
 }
 
 export function getLeaderOptions(accessToken: string) {
@@ -1019,6 +1115,34 @@ export function removeGatheringAttendance(
   )
 }
 
+export function markGatheringVisitorAttendance(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+  visitorId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}/visitor-attendance`,
+    isVisitorAttendanceMutationResult,
+    { body: JSON.stringify({ visitorId }), method: 'POST' },
+  )
+}
+
+export function removeGatheringVisitorAttendance(
+  accessToken: string,
+  lifeGroupId: string,
+  gatheringId: string,
+  visitorId: string,
+) {
+  return requestApi(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings/${gatheringId}/visitor-attendance/${visitorId}`,
+    isVisitorAttendanceMutationResult,
+    { method: 'DELETE' },
+  )
+}
+
 export function getSundayServices(accessToken: string) {
   return requestApi(accessToken, '/events', isSundayServiceDirectory)
 }
@@ -1167,13 +1291,29 @@ export function updateVisitor(
 export function convertVisitor(
   accessToken: string,
   visitorId: string,
-  lifeGroupId: string,
+  lifeGroupId?: string,
 ) {
   return requestApi(
     accessToken,
     `/visitors/${visitorId}/convert`,
     isVisitorConversionResult,
-    { body: JSON.stringify({ lifeGroupId }), method: 'POST' },
+    {
+      body: JSON.stringify(lifeGroupId ? { lifeGroupId } : {}),
+      method: 'POST',
+    },
+  )
+}
+
+export function setVisitorLifeGroup(
+  accessToken: string,
+  visitorId: string,
+  lifeGroupId: string | null,
+) {
+  return requestApi(
+    accessToken,
+    `/visitors/${visitorId}/life-group`,
+    isVisitor,
+    { body: JSON.stringify({ lifeGroupId }), method: 'PATCH' },
   )
 }
 

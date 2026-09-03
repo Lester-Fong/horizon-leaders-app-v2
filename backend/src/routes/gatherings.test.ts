@@ -12,6 +12,7 @@ import {
 const lifeGroupId = "11111111-1111-4111-8111-111111111111";
 const gatheringId = "22222222-2222-4222-8222-222222222222";
 const memberId = "33333333-3333-4333-8333-333333333333";
+const visitorId = "66666666-6666-4666-8666-666666666666";
 const leaderId = "44444444-4444-4444-8444-444444444444";
 
 const actors: Record<"admin" | "leader", HorizonActor> = {
@@ -54,6 +55,7 @@ function createAuthService(): AuthService {
 function createGatheringService(): GatheringService {
   return {
     addAttendance: vi.fn(async () => ({ isPresent: true, memberId })),
+    addVisitorAttendance: vi.fn(async () => ({ isPresent: true, visitorId })),
     create: vi.fn(async () => gathering),
     getAttendance: vi.fn(async () => ({
       members: [
@@ -69,6 +71,19 @@ function createGatheringService(): GatheringService {
           phone: null,
         },
       ],
+      visitors: [
+        {
+          currentLifeGroup: { id: lifeGroupId, name: "North Life Group" },
+          email: null,
+          firstName: "Vera",
+          id: visitorId,
+          isEligible: true,
+          isPresent: false,
+          lastName: "Visitor",
+          phone: null,
+          status: "active",
+        },
+      ],
     })),
     getById: vi.fn(async () => gathering),
     list: vi.fn(async () => ({
@@ -76,6 +91,7 @@ function createGatheringService(): GatheringService {
       lifeGroup: gathering.lifeGroup,
     })),
     removeAttendance: vi.fn(async () => ({ isPresent: false, memberId })),
+    removeVisitorAttendance: vi.fn(async () => ({ isPresent: false, visitorId })),
     update: vi.fn(async () => gathering),
   };
 }
@@ -222,6 +238,31 @@ describe("Gathering API", () => {
       lifeGroupId,
       gatheringId,
       memberId,
+    );
+  });
+
+  it("adds and removes Visitor attendance through separate identity routes", async () => {
+    const { app, gatheringService } = createTestApp();
+    const visitorPath = `${path}/${gatheringId}/visitor-attendance`;
+    const add = await request(app)
+      .post(visitorPath)
+      .set("Authorization", "Bearer leader-token")
+      .send({ visitorId });
+    const remove = await request(app)
+      .delete(`${visitorPath}/${visitorId}`)
+      .set("Authorization", "Bearer admin-token");
+    expect([add.status, remove.status]).toEqual([201, 200]);
+    expect(gatheringService.addVisitorAttendance).toHaveBeenCalledWith(
+      actors.leader,
+      lifeGroupId,
+      gatheringId,
+      visitorId,
+    );
+    expect(gatheringService.removeVisitorAttendance).toHaveBeenCalledWith(
+      actors.admin,
+      lifeGroupId,
+      gatheringId,
+      visitorId,
     );
   });
 

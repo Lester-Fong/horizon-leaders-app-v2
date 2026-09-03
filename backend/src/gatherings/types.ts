@@ -57,11 +57,29 @@ export interface GatheringAttendanceMember {
 
 export interface GatheringAttendanceRoster {
   members: GatheringAttendanceMember[];
+  visitors: GatheringAttendanceVisitor[];
+}
+
+export interface GatheringAttendanceVisitor {
+  currentLifeGroup: { id: string; name: string } | null;
+  email: string | null;
+  firstName: string;
+  id: string;
+  isEligible: boolean;
+  isPresent: boolean;
+  lastName: string;
+  phone: string | null;
+  status: "active" | "converted";
 }
 
 export interface AttendanceMutationResult {
   isPresent: boolean;
   memberId: string;
+}
+
+export interface VisitorAttendanceMutationResult {
+  isPresent: boolean;
+  visitorId: string;
 }
 
 export type GatheringErrorCode =
@@ -72,7 +90,9 @@ export type GatheringErrorCode =
   | "INACTIVE_LIFE_GROUP"
   | "LIFE_GROUP_NOT_FOUND"
   | "MEMBER_NOT_ELIGIBLE"
-  | "MEMBER_NOT_FOUND";
+  | "MEMBER_NOT_FOUND"
+  | "VISITOR_NOT_ELIGIBLE"
+  | "VISITOR_NOT_FOUND";
 
 export class GatheringServiceError extends Error {
   readonly code: GatheringErrorCode;
@@ -102,6 +122,12 @@ export interface GatheringService {
     lifeGroupId: string,
     input: GatheringInput,
   ): Promise<LifeGroupGathering>;
+  addVisitorAttendance(
+    actor: HorizonActor,
+    lifeGroupId: string,
+    gatheringId: string,
+    visitorId: string,
+  ): Promise<VisitorAttendanceMutationResult>;
   getById(
     actor: HorizonActor,
     lifeGroupId: string,
@@ -119,6 +145,12 @@ export interface GatheringService {
     gatheringId: string,
     memberId: string,
   ): Promise<AttendanceMutationResult>;
+  removeVisitorAttendance(
+    actor: HorizonActor,
+    lifeGroupId: string,
+    gatheringId: string,
+    visitorId: string,
+  ): Promise<VisitorAttendanceMutationResult>;
   update(
     actor: HorizonActor,
     lifeGroupId: string,
