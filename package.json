@@ -1,0 +1,21 @@
+{
+  "name": "horizon-church-v2",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  },
+  "scripts": {
+    "demo:seed": "npm --prefix backend run demo:seed",
+    "demo:reset": "npm --prefix backend run demo:reset",
+    "supabase": "supabase",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "supabase:test": "supabase test db",
+    "supabase:types": "supabase gen types typescript --local --schema public > backend/src/types/database.types.ts"
+  },
+  "devDependencies": {
+    "supabase": "2.114.0"
+  }
+}
