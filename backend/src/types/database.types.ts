@@ -541,6 +541,27 @@ export type Database = {
           },
         ]
       }
+      sunday_service_evaluations: {
+        Row: { event_id: string; evaluated_at: string; processed_count: number }
+        Insert: { event_id: string; evaluated_at?: string; processed_count?: number }
+        Update: { event_id?: string; evaluated_at?: string; processed_count?: number }
+        Relationships: [{ foreignKeyName: "sunday_service_evaluations_event_id_fkey"; columns: ["event_id"]; isOneToOne: true; referencedRelation: "events"; referencedColumns: ["id"] }]
+      }
+      sunday_absence_threshold_occurrences: {
+        Row: { created_at: string; event_id: string; member_id: string; new_streak: number; previous_streak: number; threshold: number }
+        Insert: { created_at?: string; event_id: string; member_id: string; new_streak: number; previous_streak: number; threshold: number }
+        Update: { created_at?: string; event_id?: string; member_id?: string; new_streak?: number; previous_streak?: number; threshold?: number }
+        Relationships: [
+          { foreignKeyName: "sunday_absence_threshold_occurrences_event_id_fkey"; columns: ["event_id"]; isOneToOne: false; referencedRelation: "events"; referencedColumns: ["id"] },
+          { foreignKeyName: "sunday_absence_threshold_occurrences_member_id_fkey"; columns: ["member_id"]; isOneToOne: false; referencedRelation: "members"; referencedColumns: ["id"] }
+        ]
+      }
+      automation_runs: {
+        Row: { error_count: number; error_summary: string | null; finished_at: string | null; id: string; job_name: string; processed_count: number; started_at: string; status: string }
+        Insert: { error_count?: number; error_summary?: string | null; finished_at?: string | null; id?: string; job_name: string; processed_count?: number; started_at?: string; status: string }
+        Update: { error_count?: number; error_summary?: string | null; finished_at?: string | null; id?: string; job_name?: string; processed_count?: number; started_at?: string; status?: string }
+        Relationships: []
+      }
       sunday_service_presence: {
         Row: {
           event_id: string
@@ -698,6 +719,14 @@ export type Database = {
           outcome: string
         }[]
       }
+      church_time_zone: { Args: Record<PropertyKey, never>; Returns: string }
+      sunday_consecutive_absence_threshold: { Args: Record<PropertyKey, never>; Returns: number }
+      opencell_participation_threshold_percent: { Args: Record<PropertyKey, never>; Returns: number }
+      evaluate_sunday_member: { Args: { p_member_id: string }; Returns: number }
+      evaluate_sunday_service: { Args: { p_event_id: string }; Returns: { error_count: number; outcome: string; processed_count: number }[] }
+      correct_sunday_service_presence: { Args: { p_event_id: string; p_member_id: string; p_present: boolean }; Returns: string }
+      update_sunday_service_counts_for_absence: { Args: { p_counts_for_absence: boolean; p_event_id: string }; Returns: string }
+      reconcile_sunday_services: { Args: Record<PropertyKey, never>; Returns: { error_count: number; processed_count: number; run_status: string }[] }
       complete_follow_up: {
         Args: {
           p_completed_by_profile_id: string

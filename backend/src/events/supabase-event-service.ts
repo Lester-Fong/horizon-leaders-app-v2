@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
+import { CHURCH_TIME_ZONE } from "../config/constants.js";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "../types/database.types.js";
 import {
   EventServiceError,
@@ -29,7 +30,7 @@ function forbidden(message = "You do not have permission to perform this action.
 }
 function manilaDate(value: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit", month: "2-digit", timeZone: "Asia/Manila", year: "numeric",
+    day: "2-digit", month: "2-digit", timeZone: CHURCH_TIME_ZONE, year: "numeric",
   }).formatToParts(new Date(value));
   const part = (type: string) => parts.find((entry) => entry.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
@@ -167,6 +168,13 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
 
   async function recordPresence(actor: HorizonActor, event: EventRow, memberId: string) {
     await eligibleMember(actor, event, memberId);
+    if (event.status === "closed") {
+      const { data, error } = await supabase.rpc("correct_sunday_service_presence", { p_event_id: event.id, p_member_id: memberId, p_present: true });
+      if (error) throw unavailable();
+      if (data === "member_not_eligible") throw new EventServiceError(422, "MEMBER_NOT_ELIGIBLE", "Only Members in the close-time eligibility snapshot can be corrected.");
+      if (data !== "recorded") throw unavailable();
+      return { memberId, result: "recorded" as const };
+    }
     const insert: TablesInsert<"sunday_service_presence"> = { event_id: event.id, member_id: memberId };
     const { error } = await supabase.from("sunday_service_presence").insert(insert);
     if (error?.code === "23505") return { memberId, result: "already_present" as const };
@@ -235,12 +243,18 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
         if (presence.error || visitors.error) throw unavailable();
         if ((presence.count ?? 0) > 0 || (visitors.count ?? 0) > 0) throw new EventServiceError(422, "EVENT_ACTIVITY_LOCKS_DATE", "Service date cannot change after attendance or Visitor registration begins.");
       }
+      if (event.status === "closed" && input.countsForAbsence !== undefined) {
+        const { data: correction, error: correctionError } = await supabase.rpc("update_sunday_service_counts_for_absence", { p_counts_for_absence: input.countsForAbsence, p_event_id: eventId });
+        if (correctionError) throw unavailable();
+        if (correction !== "updated") throw new EventServiceError(422, "EVENT_COUNTS_CORRECTION_FAILED", "Sunday Service absence tracking could not be corrected.");
+      }
       const update: TablesUpdate<"events"> = {};
-      if (input.countsForAbsence !== undefined) update.counts_for_absence = input.countsForAbsence;
+      if (input.countsForAbsence !== undefined && event.status === "open") update.counts_for_absence = input.countsForAbsence;
       if (input.description !== undefined) update.description = input.description;
       if (input.eventDate !== undefined) update.event_date = input.eventDate;
       if (input.location !== undefined) update.location = input.location;
       if (input.title !== undefined) update.title = input.title;
+      if (Object.keys(update).length === 0) return hydrateOne(await eventRow(eventId));
       const { data, error } = await supabase.from("events").update(update).eq("id", eventId).select(EVENT_COLUMNS).single();
       if (error?.code === "23505") throw new EventServiceError(409, "EVENT_DATE_CONFLICT", "A counting Sunday Service already exists on this date.");
       if (error?.code === "23514") throw new EventServiceError(422, "EVENT_DATE_INVALID", "Counting Services must use a Sunday date.");
@@ -272,6 +286,13 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
     async removeAttendance(actor, eventId, memberId) {
       const event = await eventRow(eventId);
       await eligibleMember(actor, event, memberId);
+      if (event.status === "closed") {
+        const { data, error } = await supabase.rpc("correct_sunday_service_presence", { p_event_id: eventId, p_member_id: memberId, p_present: false });
+        if (error) throw unavailable();
+        if (data === "member_not_eligible") throw new EventServiceError(422, "MEMBER_NOT_ELIGIBLE", "Only Members in the close-time eligibility snapshot can be corrected.");
+        if (data !== "removed") throw new EventServiceError(404, "ATTENDANCE_NOT_FOUND", "Member is not marked present.");
+        return { memberId, result: "removed" };
+      }
       const { data, error } = await supabase.from("sunday_service_presence").delete().eq("event_id", eventId).eq("member_id", memberId).select("member_id").maybeSingle();
       if (error) throw unavailable();
       if (!data) throw new EventServiceError(404, "ATTENDANCE_NOT_FOUND", "Member is not marked present.");

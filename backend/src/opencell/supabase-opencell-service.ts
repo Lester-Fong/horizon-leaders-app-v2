@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { createClient } from "@supabase/supabase-js";
+import { CHURCH_TIME_ZONE } from "../config/constants.js";
 import type { Database, Tables } from "../types/database.types.js";
 import { OpenCellServiceError, type OpenCellEvaluation, type OpenCellProgramme, type OpenCellService, type OpenCellSession } from "./types.js";
 
@@ -10,7 +11,7 @@ function unavailable(){return new OpenCellServiceError(500,"OPENCELL_SERVICE_UNA
 function notFound(){return new OpenCellServiceError(404,"OPENCELL_NOT_FOUND","OpenCell record was not found.");}
 function mapProgramme(row:Tables<"opencell_programmes">,sessionCount=0,participantCount=0):OpenCellProgramme{return {id:row.id,name:row.name,description:row.description,status:row.status,createdByProfileId:row.created_by_profile_id,finishedAt:row.finished_at,createdAt:row.created_at,updatedAt:row.updated_at,sessionCount,participantCount};}
 function mapSession(row:Tables<"opencell_sessions">,attendanceCount=0):OpenCellSession{return {id:row.id,programmeId:row.programme_id,sessionDate:row.session_date,title:row.title,location:row.location,notes:row.notes,isCancelled:row.is_cancelled,createdAt:row.created_at,updatedAt:row.updated_at,attendanceCount};}
-function churchToday(){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Manila",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());}
+function churchToday(){return new Intl.DateTimeFormat("en-CA",{timeZone:CHURCH_TIME_ZONE,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());}
 export function createSupabaseOpenCellService({serviceRoleKey,supabaseUrl}:Config):OpenCellService{
  const supabase=createClient<Database>(supabaseUrl,serviceRoleKey,{auth:{autoRefreshToken:false,detectSessionInUrl:false,persistSession:false}});
  async function programme(id:string){const {data,error}=await supabase.from("opencell_programmes").select(PROGRAMME_COLUMNS).eq("id",id).maybeSingle();if(error)throw unavailable();if(!data)throw notFound();return data;}

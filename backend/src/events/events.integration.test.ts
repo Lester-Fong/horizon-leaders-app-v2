@@ -22,7 +22,7 @@ describeLocal("Sunday Service API with local Supabase", () => {
 
   afterEach(async () => {
     if (eventIds.length) {
-      for (const table of ["sunday_service_visitor_registrations", "sunday_service_presence", "sunday_service_eligibility"] as const) {
+      for (const table of ["sunday_service_visitor_registrations", "sunday_service_presence", "sunday_service_eligibility", "sunday_service_evaluations", "sunday_absence_threshold_occurrences"] as const) {
         const { error } = await client.from(table).delete().in("event_id", eventIds); if (error) throw error;
       }
       const { error } = await client.from("events").delete().in("id", eventIds); if (error) throw error; eventIds.length = 0;
