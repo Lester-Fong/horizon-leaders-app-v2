@@ -24,7 +24,12 @@ Equivalent one-off CLI commands may be run with `npx supabase <command>` after r
 - `tests/database/profiles.test.sql` — transactional pgTAP coverage for schema and security invariants
 - `.gitignore` — excludes Supabase CLI temporary/branch state and local environment keys
 
-No seed file exists because this slice does not require persistent development data.
+Database SQL seeding remains disabled. Opt-in local demo data is created by the
+modular backend seeder: run `npm run demo:seed` on an empty running local
+database, or `npm run demo:reset` to explicitly destroy local data, replay the
+pinned migrations, and seed again. See the root README's Local demo church
+section for credentials, safeguards, and scenarios. Demo records never belong
+in migrations.
 
 ## Daily workflow
 
@@ -53,7 +58,7 @@ The normal `supabase db reset` command targets the local project. Never add `--l
 
 An Auth-user insert trigger creates the matching profile. It may copy user-controlled metadata only into the display name. It never trusts metadata for role or activation state, always defaults the role to `leader`, and therefore cannot create an `admin` through self-supplied signup metadata. Missing names fall back deterministically to the email local part and then `New user`.
 
-Public signup is disabled by top-level `auth.enable_signup = false` in `config.toml` because Horizon intends controlled staff accounts. The email provider remains enabled so those existing controlled users can sign in with a password; the global setting still rejects registration. Phase 2 tests create random disposable users through the local admin API and remove them afterward. No production seeder or default account exists. See the official [Supabase Auth configuration guidance](https://supabase.com/docs/guides/auth/general-configuration).
+Public signup is disabled by top-level `auth.enable_signup = false` in `config.toml` because Horizon intends controlled staff accounts. The email provider remains enabled so those existing controlled users can sign in with a password; the global setting still rejects registration. Integration tests create random disposable users through the local admin API and remove them afterward. The opt-in demo seeder also uses this API and sets roles through the privileged Profile path. No production seeder or production default account exists. See the official [Supabase Auth configuration guidance](https://supabase.com/docs/guides/auth/general-configuration).
 
 ## RLS baseline
 

@@ -16,6 +16,8 @@
 npm-debug.log*
 package-lock.json
 package.json
+!/package.json
+!/backend/package.json
 
 # Local editor and operating-system files
 .DS_Store

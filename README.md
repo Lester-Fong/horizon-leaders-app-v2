@@ -44,6 +44,56 @@ npm run supabase:stop
 
 The local project is not linked to a hosted Supabase project. Public signup is disabled, and credentials printed by the local CLI are development-only and must not be committed or reused as production secrets. See [supabase/README.md](supabase/README.md) for the workflow and security baseline.
 
+## Local demo church
+
+With Docker/local Supabase running, root and backend dependencies installed,
+and `backend/.env` configured with the local `SUPABASE_URL` and backend-only
+`SUPABASE_SERVICE_ROLE_KEY`, run from the repository root:
+
+```bash
+npm run demo:seed
+```
+
+This requires an empty local database and creates 1 Admin, 7 Leaders, 7 Life
+Groups, 46 Members (44 active), 18 Visitors (2 converted), 5 Ministries,
+28 Gatherings, 14 Sunday Services, 2 Harvest Events, and 3 OpenCell Programmes.
+Follow Ups are generated through the real workflows; the command verifies the
+dataset and prints the final counts.
+
+| Local demo login | Password |
+| --- | --- |
+| `admin@example.test` | `Admin123!Aa` |
+| `leader1@example.test` through `leader7@example.test` | `Leader123!Aa` |
+
+For a repeatable fresh dataset:
+
+```bash
+npm run demo:reset
+```
+
+**Reset destroys all data in this project's disposable local database.** It
+runs the existing pinned `supabase:reset` command before seeding. `demo:seed`
+never deletes existing data; it refuses non-empty or partially seeded databases
+and directs you to the explicit reset command. Do not run concurrent seed/reset
+commands.
+
+Both commands reject remote/unknown Supabase URLs before connecting or resetting.
+Only HTTP loopback endpoints on the configured local API port `54321` are
+accepted. Demo passwords/records are development fixtures, never production
+defaults. Privileged keys come only from backend environment configuration.
+
+The modules under `backend/src/demo/` use the real conversion, Sunday closing
+and absence evaluation, Harvest interest, OpenCell finish, and Follow Up
+completion services. Relative dates use Asia/Manila. Base Member timestamps are
+backdated before recording historical attendance so close-time eligibility is
+authentic; snapshots, absence state, QR tokens, and generated Follow Ups are not
+fabricated. The demo includes archived history, varied demographics, late
+OpenCell enrollment, cancelled Sessions, and converted Visitor history.
+
+On January dates, the This Year chart naturally contains only qualifying Sundays
+already elapsed in that year; Last 4/8/12 retains the cross-year history.
+Targeted seeder tests: `npm --prefix backend test -- src/demo/demo.test.ts`.
+
 ## Frontend
 
 Copy `frontend/.env.example` to `frontend/.env.local` and use only the local browser-safe Supabase publishable (or legacy anon) key reported by `supabase status`. Never put a service-role or secret key in a `VITE_` variable.

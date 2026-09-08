@@ -125,6 +125,20 @@ describe("Member API read and mutation boundary", () => {
     });
   });
 
+  it("passes approved demographic filters without widening Leader scope", async () => {
+    const { app, memberService } = createTestApp();
+    const response = await request(app)
+      .get("/api/members?gender=female&age=25_34&status=all")
+      .set("Authorization", "Bearer leader-token");
+
+    expect(response.status).toBe(200);
+    expect(memberService.list).toHaveBeenCalledWith(actors.leader, {
+      age: "25_34",
+      gender: "female",
+      status: "active",
+    });
+  });
+
   it("returns scoped Member details and validates read parameters", async () => {
     const { app, memberService } = createTestApp();
     const detailResponse = await request(app)

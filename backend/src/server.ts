@@ -10,6 +10,7 @@ import { createSupabaseMemberService } from "./members/supabase-member-service.j
 import { createSupabaseMinistryService } from "./ministries/supabase-ministry-service.js";
 import { createSupabaseOpenCellService } from "./opencell/supabase-opencell-service.js";
 import { createSupabaseVisitorService } from "./visitors/supabase-visitor-service.js";
+import { createSupabaseDashboardService } from "./dashboard/supabase-dashboard-service.js";
 
 const authService = createSupabaseAuthService({
   serviceRoleKey: config.supabaseServiceRoleKey,
@@ -54,6 +55,10 @@ const openCellService = createSupabaseOpenCellService({
   serviceRoleKey: config.supabaseServiceRoleKey,
   supabaseUrl: config.supabaseUrl,
 });
+const dashboardService = createSupabaseDashboardService({
+  serviceRoleKey: config.supabaseServiceRoleKey,
+  supabaseUrl: config.supabaseUrl,
+});
 
 const app = createApp({
   authService,
@@ -67,6 +72,7 @@ const app = createApp({
   ministryService,
   visitorService,
   openCellService,
+  dashboardService,
 });
 
 app.listen(config.port, () => {

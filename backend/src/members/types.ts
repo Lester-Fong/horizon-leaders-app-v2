@@ -48,8 +48,19 @@ export interface UpdateMemberInput {
 }
 
 export type MemberListStatus = "active" | "archived" | "all";
+export type MemberGenderFilter = "male" | "female" | "not_set";
+export type MemberAgeFilter =
+  | "under_18"
+  | "18_24"
+  | "25_34"
+  | "35_44"
+  | "45_54"
+  | "55_plus"
+  | "not_set";
 
 export interface ListMembersOptions {
+  age?: MemberAgeFilter;
+  gender?: MemberGenderFilter;
   lifeGroupId?: string;
   search?: string;
   status: MemberListStatus;

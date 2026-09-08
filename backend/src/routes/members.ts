@@ -6,7 +6,9 @@ import {
   MemberServiceError,
   type CreateMemberInput,
   type ListMembersOptions,
+  type MemberAgeFilter,
   type MemberGender,
+  type MemberGenderFilter,
   type MemberListStatus,
   type MemberService,
   type UpdateMemberInput,
@@ -95,6 +97,19 @@ function readQueryString(value: unknown) {
 
 function readStatus(value: unknown): MemberListStatus | undefined {
   return value === "active" || value === "archived" || value === "all"
+    ? value
+    : undefined;
+}
+
+function readGenderFilter(value: unknown): MemberGenderFilter | undefined {
+  return value === "male" || value === "female" || value === "not_set"
+    ? value
+    : undefined;
+}
+
+function readAgeFilter(value: unknown): MemberAgeFilter | undefined {
+  return value === "under_18" || value === "18_24" || value === "25_34" ||
+    value === "35_44" || value === "45_54" || value === "55_plus" || value === "not_set"
     ? value
     : undefined;
 }
@@ -223,9 +238,21 @@ export function createMembersRouter(
     const search = readQueryString(searchValue)?.trim() || undefined;
 
     if (request.actor.role === "leader") {
+      const genderValue = request.query.gender;
+      const ageValue = request.query.age;
+      const gender = typeof genderValue === "string" ? readGenderFilter(genderValue) : undefined;
+      const age = typeof ageValue === "string" ? readAgeFilter(ageValue) : undefined;
+      if ((genderValue !== undefined && !gender) || (ageValue !== undefined && !age) ||
+        (genderValue !== undefined && typeof genderValue !== "string") ||
+        (ageValue !== undefined && typeof ageValue !== "string")) {
+        sendError(response, 400, "INVALID_REQUEST", "Member demographic filter is invalid.");
+        return;
+      }
       const options: ListMembersOptions = {
         ...(search ? { search } : {}),
         status: "active",
+        ...(gender ? { gender } : {}),
+        ...(age ? { age } : {}),
       };
       response.set("Cache-Control", "private, no-store");
       await handleRequest(response, () =>
@@ -264,6 +291,21 @@ export function createMembersRouter(
       ...(search ? { search } : {}),
       status,
     };
+    const genderValue = request.query.gender;
+    const ageValue = request.query.age;
+    if ((genderValue !== undefined && typeof genderValue !== "string") ||
+      (ageValue !== undefined && typeof ageValue !== "string")) {
+      sendError(response, 400, "INVALID_REQUEST", "Member demographic filters must be text.");
+      return;
+    }
+    const gender = genderValue === undefined ? undefined : readGenderFilter(genderValue);
+    const age = ageValue === undefined ? undefined : readAgeFilter(ageValue);
+    if ((genderValue !== undefined && !gender) || (ageValue !== undefined && !age)) {
+      sendError(response, 400, "INVALID_REQUEST", "Member demographic filter is invalid.");
+      return;
+    }
+    if (gender) options.gender = gender;
+    if (age) options.age = age;
     response.set("Cache-Control", "private, no-store");
     await handleRequest(response, () =>
       memberService.list(request.actor!, options),

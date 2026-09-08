@@ -33,10 +33,12 @@ import { createMembersRouter } from "./routes/members.js";
 import { createMinistriesRouter } from "./routes/ministries.js";
 import { createOpenCellRouter } from "./routes/opencell.js";
 import { createVisitorsRouter } from "./routes/visitors.js";
+import { createDashboardRouter } from "./routes/dashboard.js";
 import {
   VisitorServiceError,
   type VisitorService,
 } from "./visitors/types.js";
+import { DashboardServiceError, type DashboardService } from "./dashboard/types.js";
 
 export interface AppDependencies {
   authService: AuthService;
@@ -50,6 +52,7 @@ export interface AppDependencies {
   ministryService?: MinistryService;
   openCellService?: OpenCellService;
   visitorService?: VisitorService;
+  dashboardService?: DashboardService;
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
@@ -140,6 +143,9 @@ const unavailableVisitorService: VisitorService = {
 const unavailableOpenCellService: OpenCellService = {
   list: async () => unavailableOpenCell(), getById: async () => unavailableOpenCell(), create: async () => unavailableOpenCell(), update: async () => unavailableOpenCell(), finish: async () => unavailableOpenCell(), listSessions: async () => unavailableOpenCell(), createSession: async () => unavailableOpenCell(), updateSession: async () => unavailableOpenCell(), cancelSession: async () => unavailableOpenCell(), listParticipants: async () => unavailableOpenCell(), enroll: async () => unavailableOpenCell(), removeEnrollment: async () => unavailableOpenCell(), listAttendance: async () => unavailableOpenCell(), addAttendance: async () => unavailableOpenCell(), removeAttendance: async () => unavailableOpenCell(),
 };
+const unavailableDashboardService: DashboardService = {
+  get: async () => { throw new DashboardServiceError(500, "DASHBOARD_SERVICE_UNAVAILABLE", "Dashboard data is temporarily unavailable."); },
+};
 
 function unavailable(): never {
   throw new LifeGroupServiceError(
@@ -213,6 +219,7 @@ export function createApp({
   memberService = unavailableMemberService,
   ministryService = unavailableMinistryService,
   openCellService = unavailableOpenCellService,
+  dashboardService = unavailableDashboardService,
   visitorService = unavailableVisitorService,
 }: AppDependencies) {
   const app = express();
@@ -229,6 +236,7 @@ export function createApp({
   app.use("/api", createMembersRouter(authService, memberService));
   app.use("/api", createMinistriesRouter(authService, ministryService));
   app.use("/api", createOpenCellRouter(authService, openCellService));
+  app.use("/api", createDashboardRouter(authService, dashboardService));
   app.use("/api", createVisitorsRouter(authService, visitorService));
 
   return app;

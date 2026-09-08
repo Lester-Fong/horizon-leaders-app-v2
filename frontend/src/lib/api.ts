@@ -90,10 +90,28 @@ export interface MemberInput {
 export type MemberListStatus = 'active' | 'archived' | 'all'
 
 export interface MemberListFilters {
+  age?: MemberAgeFilter
+  gender?: MemberGenderFilter
   lifeGroupId?: string
   search?: string
   status?: MemberListStatus
 }
+
+export type MemberGenderFilter = 'male' | 'female' | 'not_set'
+export type MemberAgeFilter = 'under_18' | '18_24' | '25_34' | '35_44' | '45_54' | '55_plus' | 'not_set'
+
+export interface DashboardBreakdown { count: number; key: string; label: string; percentage: number }
+export interface DashboardData {
+  memberSnapshot: { age: DashboardBreakdown[]; gender: DashboardBreakdown[] }
+  metrics: { activeFollowUps: number; activeMembers?: number; activeOpenCellProgrammes: number; activeVisitors?: number; myLifeGroupMembers?: number; myLifeGroupVisitors?: number; newVisitorsThisMonth?: number }
+  needsAttention: { byReason: DashboardBreakdown[]; total: number }
+  openCell: { activeProgrammes: number; currentParticipants: number }
+  recentUpcoming: { recent: DashboardActivityItem[]; upcoming: DashboardActivityItem[] }
+  sundayAttendance: { averageRate: number | null; points: DashboardChartPoint[] }
+}
+export interface DashboardActivityItem { context: string | null; date: string; href: string | null; id: string; kind: string; status: string | null; title: string }
+export interface DashboardChartPoint { date: string; eligibleCount: number; eventId: string; presentCount: number; rate: number | null }
+export type DashboardPeriod = '4' | '8' | '12' | 'year'
 
 export interface Ministry {
   createdAt: string
@@ -837,6 +855,13 @@ const isLeaderOptionList = (value: unknown): value is LeaderOption[] =>
 const isMemberList = (value: unknown): value is Member[] =>
   Array.isArray(value) && value.every(isMember)
 
+const isDashboard = (value: unknown): value is DashboardData => {
+  if (!isRecord(value) || !isRecord(value.metrics) || !isRecord(value.memberSnapshot) || !isRecord(value.needsAttention) || !isRecord(value.openCell) || !isRecord(value.recentUpcoming) || !isRecord(value.sundayAttendance)) return false
+  return typeof value.metrics.activeFollowUps === 'number' && typeof value.metrics.activeOpenCellProgrammes === 'number' &&
+    Array.isArray(value.memberSnapshot.gender) && Array.isArray(value.memberSnapshot.age) &&
+    Array.isArray(value.sundayAttendance.points) && Array.isArray(value.recentUpcoming.upcoming) && Array.isArray(value.recentUpcoming.recent)
+}
+
 const isMinistryList = (value: unknown): value is Ministry[] =>
   Array.isArray(value) && value.every(isMinistry)
 
@@ -938,8 +963,16 @@ export function getMembers(
     searchParameters.set('lifeGroupId', filters.lifeGroupId)
   }
   if (filters.status) searchParameters.set('status', filters.status)
+  if (filters.gender) searchParameters.set('gender', filters.gender)
+  if (filters.age) searchParameters.set('age', filters.age)
   const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
   return requestApi(accessToken, `/members${query}`, isMemberList)
+}
+
+export function getDashboard(accessToken: string, period: DashboardPeriod = '8', lifeGroupId?: string) {
+  const search = new URLSearchParams({ period })
+  if (lifeGroupId) search.set('lifeGroupId', lifeGroupId)
+  return requestApi(accessToken, `/dashboard?${search.toString()}`, isDashboard)
 }
 
 export function getMember(accessToken: string, memberId: string) {

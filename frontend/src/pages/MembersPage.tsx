@@ -14,6 +14,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import {
@@ -45,6 +46,8 @@ import {
   type Member,
   type MemberInput,
   type MemberListStatus,
+  type MemberAgeFilter,
+  type MemberGenderFilter,
 } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
@@ -85,6 +88,7 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 export function MembersPage() {
   const { actor } = useAuth()
+  const [searchParams] = useSearchParams()
   const isAdmin = actor?.role === 'admin'
   const [members, setMembers] = useState<Member[]>([])
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
@@ -93,8 +97,19 @@ export function MembersPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [lifeGroupFilter, setLifeGroupFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState<MemberListStatus>('active')
+  const [lifeGroupFilter, setLifeGroupFilter] = useState(() => searchParams.get('lifeGroupId') ?? '')
+  const [statusFilter, setStatusFilter] = useState<MemberListStatus>(() => {
+    const value = searchParams.get('status')
+    return value === 'archived' || value === 'all' ? value : 'active'
+  })
+  const [genderFilter, setGenderFilter] = useState<MemberGenderFilter | ''>(() => {
+    const value = searchParams.get('gender')
+    return value === 'male' || value === 'female' || value === 'not_set' ? value : ''
+  })
+  const [ageFilter, setAgeFilter] = useState<MemberAgeFilter | ''>(() => {
+    const value = searchParams.get('age')
+    return value === 'under_18' || value === '18_24' || value === '25_34' || value === '35_44' || value === '45_54' || value === '55_plus' || value === 'not_set' ? value : ''
+  })
   const [formContext, setFormContext] = useState<MemberFormContext | null>(null)
   const [detailMemberId, setDetailMemberId] = useState<string | null>(null)
   const [detailMember, setDetailMember] = useState<Member | null>(null)
@@ -125,6 +140,8 @@ export function MembersPage() {
             ...(lifeGroupFilter ? { lifeGroupId: lifeGroupFilter } : {}),
             ...(search ? { search } : {}),
             status: statusFilter,
+            ...(genderFilter ? { gender: genderFilter } : {}),
+            ...(ageFilter ? { age: ageFilter } : {}),
           }
         : { ...(search ? { search } : {}) }
       const [memberData, lifeGroupData] = await Promise.all([
@@ -138,7 +155,7 @@ export function MembersPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [isAdmin, lifeGroupFilter, search, statusFilter])
+  }, [ageFilter, genderFilter, isAdmin, lifeGroupFilter, search, statusFilter])
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => void loadDirectory(), 0)
@@ -246,7 +263,7 @@ export function MembersPage() {
   }
 
   const hasFilters = Boolean(
-    search || (isAdmin && (lifeGroupFilter || statusFilter !== 'active')),
+    search || genderFilter || ageFilter || (isAdmin && (lifeGroupFilter || statusFilter !== 'active')),
   )
 
   return (
@@ -340,6 +357,26 @@ export function MembersPage() {
               </Select>
             </FormField>
           )}
+          <FormField id="member-gender-filter" label="Gender">
+            <Select id="member-gender-filter" value={genderFilter} onChange={(event) => setGenderFilter(event.target.value as MemberGenderFilter | '')}>
+              <option value="">All genders</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="not_set">Not set</option>
+            </Select>
+          </FormField>
+          <FormField id="member-age-filter" label="Age">
+            <Select id="member-age-filter" value={ageFilter} onChange={(event) => setAgeFilter(event.target.value as MemberAgeFilter | '')}>
+              <option value="">All ages</option>
+              <option value="under_18">Under 18</option>
+              <option value="18_24">18–24</option>
+              <option value="25_34">25–34</option>
+              <option value="35_44">35–44</option>
+              <option value="45_54">45–54</option>
+              <option value="55_plus">55+</option>
+              <option value="not_set">Not set</option>
+            </Select>
+          </FormField>
           {isAdmin && (
             <FormField id="member-status-filter" label="Status">
               <Select

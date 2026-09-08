@@ -18,6 +18,7 @@ import {
   isMemberQrTokenCollision,
   MEMBER_QR_TOKEN_COLLISION_RETRIES,
 } from "./member-qr-token.js";
+import { CHURCH_TIME_ZONE } from "../config/constants.js";
 
 interface SupabaseMemberServiceConfig {
   generateQrToken?: () => string;
@@ -94,6 +95,36 @@ function mapMember(member: MemberRow, lifeGroup: LifeGroupRow): Member {
     qrToken: member.qr_token,
     updatedAt: member.updated_at,
   };
+}
+
+function churchToday() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: CHURCH_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function ageForBirthDate(birthDate: string | null) {
+  if (!birthDate) return null;
+  const today = churchToday();
+  let age = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4));
+  if (today.slice(5) < birthDate.slice(5)) age -= 1;
+  return age;
+}
+
+function matchesAge(birthDate: string | null, filter: ListMembersOptions["age"]) {
+  if (!filter) return true;
+  const age = ageForBirthDate(birthDate);
+  if (filter === "not_set") return age === null;
+  if (age === null) return false;
+  if (filter === "under_18") return age < 18;
+  if (filter === "18_24") return age >= 18 && age <= 24;
+  if (filter === "25_34") return age >= 25 && age <= 34;
+  if (filter === "35_44") return age >= 35 && age <= 44;
+  if (filter === "45_54") return age >= 45 && age <= 54;
+  return age >= 55;
 }
 
 export function createSupabaseMemberService({
@@ -250,7 +281,15 @@ export function createSupabaseMemberService({
     async list(actor, options) {
       const rows = await listRows(actor, options);
       const members = await Promise.all(rows.map(hydrateMember));
-      return members.filter((member) => matchesSearch(member, options.search));
+      return members.filter(
+        (member) =>
+          matchesSearch(member, options.search) &&
+          (!options.gender ||
+            (options.gender === "not_set"
+              ? member.gender === null
+              : member.gender === options.gender)) &&
+          matchesAge(member.birthDate, options.age),
+      );
     },
 
     async getById(actor, memberId) {
