@@ -22,6 +22,7 @@ import {
   type MemberFormContext,
 } from '../components/members/MemberFormModal'
 import { MemberQrPanel } from '../components/members/MemberQrPanel'
+import { ImageAssetPanel } from '../components/uploads/ImageAssetPanel'
 import { Button } from '../components/ui/Button'
 import {
   EmptyState,
@@ -41,8 +42,11 @@ import {
   createMember,
   getLifeGroups,
   getMember,
+  getMemberPhoto,
   getMembers,
   updateMember,
+  uploadMemberPhoto,
+  removeMemberPhoto,
   type LifeGroup,
   type Member,
   type MemberInput,
@@ -118,6 +122,20 @@ export function MembersPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<Member | null>(null)
   const [isArchiving, setIsArchiving] = useState(false)
+
+  const detailMemberImageId = detailMember?.id ?? null
+  const loadMemberPhoto = useCallback(async () => {
+    if (!detailMemberImageId) return { imageUrl: null }
+    return getMemberPhoto(await getAccessToken(), detailMemberImageId)
+  }, [detailMemberImageId])
+  const saveMemberPhoto = useCallback(async (file: File) => {
+    if (!detailMemberImageId) return { imageUrl: null }
+    return uploadMemberPhoto(await getAccessToken(), detailMemberImageId, file)
+  }, [detailMemberImageId])
+  const deleteMemberPhoto = useCallback(async () => {
+    if (!detailMemberImageId) return { imageUrl: null }
+    return removeMemberPhoto(await getAccessToken(), detailMemberImageId)
+  }, [detailMemberImageId])
 
   const activeLifeGroups = useMemo(
     () => lifeGroups.filter((lifeGroup) => lifeGroup.isActive),
@@ -542,6 +560,16 @@ export function MembersPage() {
               <DetailItem label="Gender" value={formatGender(detailMember.gender)} />
               <DetailItem label="Address" value={detailMember.address ?? 'Not recorded'} />
             </dl>
+            <ImageAssetPanel
+              alt={`Profile photo for ${detailMember.firstName} ${detailMember.lastName}`}
+              canManage={Boolean(isAdmin || (detailMember.isActive && detailMember.lifeGroup.isActive))}
+              description="A private profile image visible only within the existing Member access scope."
+              initials={`${detailMember.firstName.charAt(0)}${detailMember.lastName.charAt(0)}`}
+              load={loadMemberPhoto}
+              onRemove={deleteMemberPhoto}
+              onUpload={saveMemberPhoto}
+              title="Member profile photo"
+            />
             <MemberQrPanel
               firstName={detailMember.firstName}
               lastName={detailMember.lastName}

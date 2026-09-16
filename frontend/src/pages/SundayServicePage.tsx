@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useParams } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { ImageAssetPanel } from '../components/uploads/ImageAssetPanel'
 import { Button, LinkButton } from '../components/ui/Button'
 import { EmptyState, ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
 import { FormField, TextInput } from '../components/ui/FormControls'
@@ -10,7 +11,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { StatusBadge } from '../components/ui/StatusBadge'
-import { ApiError, checkInSundayAttendanceByQr, createAndRegisterSundayVisitor, getSundayAttendance, getSundayService, getSundayVisitors, getVisitors, markSundayAttendance, registerSundayVisitor, removeSundayAttendance, removeSundayVisitor, type SundayAttendanceMember, type SundayService, type SundayVisitorRegistration, type Visitor } from '../lib/api'
+import { ApiError, checkInSundayAttendanceByQr, createAndRegisterSundayVisitor, getEventImage, getSundayAttendance, getSundayService, getSundayVisitors, getVisitors, markSundayAttendance, registerSundayVisitor, removeEventImage, removeSundayAttendance, removeSundayVisitor, uploadEventImage, type SundayAttendanceMember, type SundayService, type SundayVisitorRegistration, type Visitor } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
 async function token() { const { data, error } = await supabase.auth.getSession(); if (error || !data.session) throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.'); return data.session.access_token }
@@ -30,6 +31,10 @@ export function SundayServicePage() {
   const [search, setSearch] = useState(''); const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null)
   const [changing, setChanging] = useState<string | null>(null); const [qrOpen, setQrOpen] = useState(false); const [visitorOpen, setVisitorOpen] = useState(false)
+
+  const loadEventImage = useCallback(async () => eventId ? getEventImage(await token(), eventId) : { imageUrl: null }, [eventId])
+  const saveEventImage = useCallback(async (file: File) => eventId ? uploadEventImage(await token(), eventId, file) : { imageUrl: null }, [eventId])
+  const deleteEventImage = useCallback(async () => eventId ? removeEventImage(await token(), eventId) : { imageUrl: null }, [eventId])
 
   const load = useCallback(async () => {
     if (!eventId) return
@@ -71,6 +76,18 @@ export function SundayServicePage() {
       {notice && <FeedbackBanner className="mt-6" tone="success">{notice}</FeedbackBanner>}
       {error && <FeedbackBanner className="mt-6" tone="error">{error}</FeedbackBanner>}
       {event.status === 'closed' && <FeedbackBanner className="mt-6" tone="info">The eligible Member and Life Group snapshot is fixed. {isAdmin ? 'You can make attendance or Visitor corrections.' : 'Attendance and registration are read-only.'}</FeedbackBanner>}
+      <div className="mt-8 max-w-3xl">
+        <ImageAssetPanel
+          alt={`Image for Sunday Service ${event.title}`}
+          canManage={Boolean(isAdmin)}
+          description="Optional Service context image. Closing the Service does not remove it."
+          initials={event.title.slice(0, 2)}
+          load={loadEventImage}
+          onRemove={deleteEventImage}
+          onUpload={saveEventImage}
+          title="Sunday Service image"
+        />
+      </div>
       <nav aria-label="Service workspace" className="mt-8 grid border-y border-line sm:grid-cols-3">
         {tabs.map((tab) => <button key={tab.id} type="button" aria-current={section === tab.id ? 'page' : undefined} onClick={() => setSection(tab.id)} className={`min-h-16 border-b border-line px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-surface-subtle sm:border-r sm:border-b-0 sm:last:border-r-0 ${section === tab.id ? 'bg-ink text-canvas' : 'text-ink'}`}><span className="block text-sm font-semibold">{tab.label}</span><span className={`mt-1 block font-mono text-[0.65rem] uppercase tracking-[0.08em] ${section === tab.id ? 'text-canvas/70' : 'text-muted'}`}>{tab.meta}</span></button>)}
       </nav>

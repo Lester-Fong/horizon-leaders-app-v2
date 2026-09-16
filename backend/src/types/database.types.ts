@@ -9,6 +9,39 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      automation_runs: {
+        Row: {
+          error_count: number
+          error_summary: string | null
+          finished_at: string | null
+          id: string
+          job_name: string
+          processed_count: number
+          started_at: string
+          status: string
+        }
+        Insert: {
+          error_count?: number
+          error_summary?: string | null
+          finished_at?: string | null
+          id?: string
+          job_name: string
+          processed_count?: number
+          started_at?: string
+          status: string
+        }
+        Update: {
+          error_count?: number
+          error_summary?: string | null
+          finished_at?: string | null
+          id?: string
+          job_name?: string
+          processed_count?: number
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
+      }
       events: {
         Row: {
           counts_for_absence: boolean
@@ -17,6 +50,7 @@ export type Database = {
           description: string | null
           event_date: string
           id: string
+          image_path: string | null
           location: string | null
           status: Database["public"]["Enums"]["event_status"]
           title: string
@@ -30,6 +64,7 @@ export type Database = {
           description?: string | null
           event_date: string
           id?: string
+          image_path?: string | null
           location?: string | null
           status?: Database["public"]["Enums"]["event_status"]
           title: string
@@ -43,6 +78,7 @@ export type Database = {
           description?: string | null
           event_date?: string
           id?: string
+          image_path?: string | null
           location?: string | null
           status?: Database["public"]["Enums"]["event_status"]
           title?: string
@@ -297,6 +333,7 @@ export type Database = {
           id: string
           is_active: boolean
           leader_profile_id: string
+          logo_path: string | null
           name: string
           updated_at: string
         }
@@ -306,6 +343,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           leader_profile_id: string
+          logo_path?: string | null
           name: string
           updated_at?: string
         }
@@ -315,6 +353,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           leader_profile_id?: string
+          logo_path?: string | null
           name?: string
           updated_at?: string
         }
@@ -373,6 +412,7 @@ export type Database = {
           normalized_email: string | null
           normalized_phone: string | null
           phone: string | null
+          photo_path: string | null
           qr_token: string
           updated_at: string
         }
@@ -390,6 +430,7 @@ export type Database = {
           normalized_email?: string | null
           normalized_phone?: string | null
           phone?: string | null
+          photo_path?: string | null
           qr_token: string
           updated_at?: string
         }
@@ -407,6 +448,7 @@ export type Database = {
           normalized_email?: string | null
           normalized_phone?: string | null
           phone?: string | null
+          photo_path?: string | null
           qr_token?: string
           updated_at?: string
         }
@@ -448,31 +490,168 @@ export type Database = {
         Relationships: []
       }
       opencell_attendance: {
-        Row: { created_at: string; session_id: string; visitor_id: string }
-        Insert: { created_at?: string; session_id: string; visitor_id: string }
-        Update: { created_at?: string; session_id?: string; visitor_id?: string }
+        Row: {
+          created_at: string
+          session_id: string
+          visitor_id: string
+        }
+        Insert: {
+          created_at?: string
+          session_id: string
+          visitor_id: string
+        }
+        Update: {
+          created_at?: string
+          session_id?: string
+          visitor_id?: string
+        }
         Relationships: [
-          { foreignKeyName: "opencell_attendance_session_id_fkey"; columns: ["session_id"]; isOneToOne: false; referencedRelation: "opencell_sessions"; referencedColumns: ["id"] },
-          { foreignKeyName: "opencell_attendance_visitor_id_fkey"; columns: ["visitor_id"]; isOneToOne: false; referencedRelation: "visitors"; referencedColumns: ["id"] }
+          {
+            foreignKeyName: "opencell_attendance_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "opencell_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opencell_attendance_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
         ]
       }
       opencell_enrollments: {
-        Row: { created_at: string; enrolled_by_profile_id: string; enrolled_on: string; programme_id: string; visitor_id: string }
-        Insert: { created_at?: string; enrolled_by_profile_id: string; enrolled_on: string; programme_id: string; visitor_id: string }
-        Update: { created_at?: string; enrolled_by_profile_id?: string; enrolled_on?: string; programme_id?: string; visitor_id?: string }
-        Relationships: []
+        Row: {
+          created_at: string
+          enrolled_by_profile_id: string
+          enrolled_on: string
+          programme_id: string
+          visitor_id: string
+        }
+        Insert: {
+          created_at?: string
+          enrolled_by_profile_id: string
+          enrolled_on: string
+          programme_id: string
+          visitor_id: string
+        }
+        Update: {
+          created_at?: string
+          enrolled_by_profile_id?: string
+          enrolled_on?: string
+          programme_id?: string
+          visitor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opencell_enrollments_enrolled_by_profile_id_fkey"
+            columns: ["enrolled_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opencell_enrollments_programme_id_fkey"
+            columns: ["programme_id"]
+            isOneToOne: false
+            referencedRelation: "opencell_programmes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "opencell_enrollments_visitor_id_fkey"
+            columns: ["visitor_id"]
+            isOneToOne: false
+            referencedRelation: "visitors"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       opencell_programmes: {
-        Row: { created_at: string; created_by_profile_id: string; description: string | null; finished_at: string | null; id: string; name: string; status: Database["public"]["Enums"]["opencell_programme_status"]; updated_at: string }
-        Insert: { created_at?: string; created_by_profile_id: string; description?: string | null; finished_at?: string | null; id?: string; name: string; status?: Database["public"]["Enums"]["opencell_programme_status"]; updated_at?: string }
-        Update: { created_at?: string; created_by_profile_id?: string; description?: string | null; finished_at?: string | null; id?: string; name?: string; status?: Database["public"]["Enums"]["opencell_programme_status"]; updated_at?: string }
-        Relationships: [{ foreignKeyName: "opencell_programmes_created_by_profile_id_fkey"; columns: ["created_by_profile_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] }]
+        Row: {
+          created_at: string
+          created_by_profile_id: string
+          description: string | null
+          finished_at: string | null
+          id: string
+          name: string
+          status: Database["public"]["Enums"]["opencell_programme_status"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_profile_id: string
+          description?: string | null
+          finished_at?: string | null
+          id?: string
+          name: string
+          status?: Database["public"]["Enums"]["opencell_programme_status"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by_profile_id?: string
+          description?: string | null
+          finished_at?: string | null
+          id?: string
+          name?: string
+          status?: Database["public"]["Enums"]["opencell_programme_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opencell_programmes_created_by_profile_id_fkey"
+            columns: ["created_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       opencell_sessions: {
-        Row: { created_at: string; id: string; is_cancelled: boolean; location: string | null; notes: string | null; programme_id: string; session_date: string; title: string | null; updated_at: string }
-        Insert: { created_at?: string; id?: string; is_cancelled?: boolean; location?: string | null; notes?: string | null; programme_id: string; session_date: string; title?: string | null; updated_at?: string }
-        Update: { created_at?: string; id?: string; is_cancelled?: boolean; location?: string | null; notes?: string | null; programme_id?: string; session_date?: string; title?: string | null; updated_at?: string }
-        Relationships: [{ foreignKeyName: "opencell_sessions_programme_id_fkey"; columns: ["programme_id"]; isOneToOne: false; referencedRelation: "opencell_programmes"; referencedColumns: ["id"] }]
+        Row: {
+          created_at: string
+          id: string
+          is_cancelled: boolean
+          location: string | null
+          notes: string | null
+          programme_id: string
+          session_date: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_cancelled?: boolean
+          location?: string | null
+          notes?: string | null
+          programme_id: string
+          session_date: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_cancelled?: boolean
+          location?: string | null
+          notes?: string | null
+          programme_id?: string
+          session_date?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opencell_sessions_programme_id_fkey"
+            columns: ["programme_id"]
+            isOneToOne: false
+            referencedRelation: "opencell_programmes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -500,6 +679,48 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      sunday_absence_threshold_occurrences: {
+        Row: {
+          created_at: string
+          event_id: string
+          member_id: string
+          new_streak: number
+          previous_streak: number
+          threshold: number
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          member_id: string
+          new_streak: number
+          previous_streak: number
+          threshold: number
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          member_id?: string
+          new_streak?: number
+          previous_streak?: number
+          threshold?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunday_absence_threshold_occurrences_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunday_absence_threshold_occurrences_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sunday_service_eligibility: {
         Row: {
@@ -542,25 +763,30 @@ export type Database = {
         ]
       }
       sunday_service_evaluations: {
-        Row: { event_id: string; evaluated_at: string; processed_count: number }
-        Insert: { event_id: string; evaluated_at?: string; processed_count?: number }
-        Update: { event_id?: string; evaluated_at?: string; processed_count?: number }
-        Relationships: [{ foreignKeyName: "sunday_service_evaluations_event_id_fkey"; columns: ["event_id"]; isOneToOne: true; referencedRelation: "events"; referencedColumns: ["id"] }]
-      }
-      sunday_absence_threshold_occurrences: {
-        Row: { created_at: string; event_id: string; member_id: string; new_streak: number; previous_streak: number; threshold: number }
-        Insert: { created_at?: string; event_id: string; member_id: string; new_streak: number; previous_streak: number; threshold: number }
-        Update: { created_at?: string; event_id?: string; member_id?: string; new_streak?: number; previous_streak?: number; threshold?: number }
+        Row: {
+          evaluated_at: string
+          event_id: string
+          processed_count: number
+        }
+        Insert: {
+          evaluated_at?: string
+          event_id: string
+          processed_count?: number
+        }
+        Update: {
+          evaluated_at?: string
+          event_id?: string
+          processed_count?: number
+        }
         Relationships: [
-          { foreignKeyName: "sunday_absence_threshold_occurrences_event_id_fkey"; columns: ["event_id"]; isOneToOne: false; referencedRelation: "events"; referencedColumns: ["id"] },
-          { foreignKeyName: "sunday_absence_threshold_occurrences_member_id_fkey"; columns: ["member_id"]; isOneToOne: false; referencedRelation: "members"; referencedColumns: ["id"] }
+          {
+            foreignKeyName: "sunday_service_evaluations_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: true
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
         ]
-      }
-      automation_runs: {
-        Row: { error_count: number; error_summary: string | null; finished_at: string | null; id: string; job_name: string; processed_count: number; started_at: string; status: string }
-        Insert: { error_count?: number; error_summary?: string | null; finished_at?: string | null; id?: string; job_name: string; processed_count?: number; started_at?: string; status: string }
-        Update: { error_count?: number; error_summary?: string | null; finished_at?: string | null; id?: string; job_name?: string; processed_count?: number; started_at?: string; status?: string }
-        Relationships: []
       }
       sunday_service_presence: {
         Row: {
@@ -700,18 +926,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      enroll_opencell_visitor: {
-        Args: { p_enrolled_by_profile_id: string; p_enrolled_on: string; p_programme_id: string; p_visitor_id: string }
-        Returns: { enrolled_on: string; outcome: string; programme_id: string; visitor_id: string }[]
-      }
-      finish_opencell_programme: {
-        Args: { p_programme_id: string }
-        Returns: { evaluations: Json; finished_at: string; outcome: string }[]
-      }
-      remove_opencell_enrollment: {
-        Args: { p_programme_id: string; p_visitor_id: string }
-        Returns: string
-      }
+      church_time_zone: { Args: never; Returns: string }
       close_sunday_service: {
         Args: { p_event_id: string }
         Returns: {
@@ -719,14 +934,6 @@ export type Database = {
           outcome: string
         }[]
       }
-      church_time_zone: { Args: Record<PropertyKey, never>; Returns: string }
-      sunday_consecutive_absence_threshold: { Args: Record<PropertyKey, never>; Returns: number }
-      opencell_participation_threshold_percent: { Args: Record<PropertyKey, never>; Returns: number }
-      evaluate_sunday_member: { Args: { p_member_id: string }; Returns: number }
-      evaluate_sunday_service: { Args: { p_event_id: string }; Returns: { error_count: number; outcome: string; processed_count: number }[] }
-      correct_sunday_service_presence: { Args: { p_event_id: string; p_member_id: string; p_present: boolean }; Returns: string }
-      update_sunday_service_counts_for_absence: { Args: { p_counts_for_absence: boolean; p_event_id: string }; Returns: string }
-      reconcile_sunday_services: { Args: Record<PropertyKey, never>; Returns: { error_count: number; processed_count: number; run_status: string }[] }
       complete_follow_up: {
         Args: {
           p_completed_by_profile_id: string
@@ -752,12 +959,8 @@ export type Database = {
           outcome: string
         }[]
       }
-      set_visitor_life_group: {
-        Args: {
-          p_expected_life_group_id: string | null
-          p_life_group_id: string | null
-          p_visitor_id: string
-        }
+      correct_sunday_service_presence: {
+        Args: { p_event_id: string; p_member_id: string; p_present: boolean }
         Returns: string
       }
       create_follow_up_if_absent: {
@@ -808,8 +1011,48 @@ export type Database = {
           outcome: string
         }[]
       }
+      enroll_opencell_visitor: {
+        Args: {
+          p_enrolled_by_profile_id: string
+          p_enrolled_on: string
+          p_programme_id: string
+          p_visitor_id: string
+        }
+        Returns: {
+          enrolled_on: string
+          outcome: string
+          programme_id: string
+          visitor_id: string
+        }[]
+      }
+      evaluate_sunday_member: { Args: { p_member_id: string }; Returns: number }
+      evaluate_sunday_service: {
+        Args: { p_event_id: string }
+        Returns: {
+          error_count: number
+          outcome: string
+          processed_count: number
+        }[]
+      }
+      finish_opencell_programme: {
+        Args: { p_programme_id: string }
+        Returns: {
+          evaluations: Json
+          finished_at: string
+          outcome: string
+        }[]
+      }
       normalize_member_email: { Args: { value: string }; Returns: string }
       normalize_member_phone: { Args: { value: string }; Returns: string }
+      opencell_participation_threshold_percent: { Args: never; Returns: number }
+      reconcile_sunday_services: {
+        Args: never
+        Returns: {
+          error_count: number
+          processed_count: number
+          run_status: string
+        }[]
+      }
       record_harvest_sunday_interest: {
         Args: {
           p_event_id: string
@@ -823,6 +1066,23 @@ export type Database = {
           outcome: string
         }[]
       }
+      remove_opencell_enrollment: {
+        Args: { p_programme_id: string; p_visitor_id: string }
+        Returns: string
+      }
+      set_visitor_life_group: {
+        Args: {
+          p_expected_life_group_id: string | null
+          p_life_group_id: string | null
+          p_visitor_id: string
+        }
+        Returns: string
+      }
+      sunday_consecutive_absence_threshold: { Args: never; Returns: number }
+      update_sunday_service_counts_for_absence: {
+        Args: { p_counts_for_absence: boolean; p_event_id: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role: "admin" | "leader"
@@ -834,8 +1094,8 @@ export type Database = {
         | "harvest_sunday_interest"
       follow_up_status: "active" | "completed"
       member_gender: "male" | "female"
-      visitor_status: "active" | "converted"
       opencell_programme_status: "active" | "finished"
+      visitor_status: "active" | "converted"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -973,8 +1233,8 @@ export const Constants = {
       ],
       follow_up_status: ["active", "completed"],
       member_gender: ["male", "female"],
-      visitor_status: ["active", "converted"],
       opencell_programme_status: ["active", "finished"],
+      visitor_status: ["active", "converted"],
     },
   },
 } as const

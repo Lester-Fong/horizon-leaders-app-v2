@@ -11,6 +11,7 @@ import { createSupabaseMinistryService } from "./ministries/supabase-ministry-se
 import { createSupabaseOpenCellService } from "./opencell/supabase-opencell-service.js";
 import { createSupabaseVisitorService } from "./visitors/supabase-visitor-service.js";
 import { createSupabaseDashboardService } from "./dashboard/supabase-dashboard-service.js";
+import { createSupabaseUploadService } from "./uploads/supabase-upload-service.js";
 
 const authService = createSupabaseAuthService({
   serviceRoleKey: config.supabaseServiceRoleKey,
@@ -59,6 +60,10 @@ const dashboardService = createSupabaseDashboardService({
   serviceRoleKey: config.supabaseServiceRoleKey,
   supabaseUrl: config.supabaseUrl,
 });
+const uploadService = createSupabaseUploadService({
+  serviceRoleKey: config.supabaseServiceRoleKey,
+  supabaseUrl: config.supabaseUrl,
+});
 
 const app = createApp({
   authService,
@@ -73,6 +78,7 @@ const app = createApp({
   visitorService,
   openCellService,
   dashboardService,
+  uploadService,
 });
 
 app.listen(config.port, () => {

@@ -30,7 +30,10 @@ type LifeGroupRow = Pick<
   Tables<"life_groups">,
   "id" | "is_active" | "leader_profile_id" | "name"
 >;
-type MemberRow = Omit<Tables<"members">, "normalized_email" | "normalized_phone">;
+type MemberRow = Omit<
+  Tables<"members">,
+  "normalized_email" | "normalized_phone" | "photo_path"
+>;
 
 const MEMBER_COLUMNS =
   "id, first_name, last_name, phone, email, address, birth_date, gender, life_group_id, qr_token, is_active, created_at, updated_at";

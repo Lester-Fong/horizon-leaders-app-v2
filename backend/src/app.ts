@@ -33,12 +33,14 @@ import { createMembersRouter } from "./routes/members.js";
 import { createMinistriesRouter } from "./routes/ministries.js";
 import { createOpenCellRouter } from "./routes/opencell.js";
 import { createVisitorsRouter } from "./routes/visitors.js";
+import { createUploadsRouter } from "./routes/uploads.js";
 import { createDashboardRouter } from "./routes/dashboard.js";
 import {
   VisitorServiceError,
   type VisitorService,
 } from "./visitors/types.js";
 import { DashboardServiceError, type DashboardService } from "./dashboard/types.js";
+import { UploadServiceError, type UploadService } from "./uploads/types.js";
 
 export interface AppDependencies {
   authService: AuthService;
@@ -53,6 +55,7 @@ export interface AppDependencies {
   openCellService?: OpenCellService;
   visitorService?: VisitorService;
   dashboardService?: DashboardService;
+  uploadService?: UploadService;
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
@@ -146,6 +149,17 @@ const unavailableOpenCellService: OpenCellService = {
 const unavailableDashboardService: DashboardService = {
   get: async () => { throw new DashboardServiceError(500, "DASHBOARD_SERVICE_UNAVAILABLE", "Dashboard data is temporarily unavailable."); },
 };
+const unavailableUploadService: UploadService = {
+  getEventImage: async () => unavailableUpload(),
+  getLifeGroupLogo: async () => unavailableUpload(),
+  getMemberPhoto: async () => unavailableUpload(),
+  removeEventImage: async () => unavailableUpload(),
+  removeLifeGroupLogo: async () => unavailableUpload(),
+  removeMemberPhoto: async () => unavailableUpload(),
+  replaceEventImage: async () => unavailableUpload(),
+  replaceLifeGroupLogo: async () => unavailableUpload(),
+  replaceMemberPhoto: async () => unavailableUpload(),
+};
 
 function unavailable(): never {
   throw new LifeGroupServiceError(
@@ -207,6 +221,7 @@ function unavailableVisitor(): never {
   );
 }
 function unavailableOpenCell(): never { throw new OpenCellServiceError(500,"OPENCELL_SERVICE_UNAVAILABLE","OpenCell data is temporarily unavailable."); }
+function unavailableUpload(): never { throw new UploadServiceError(500, "UPLOAD_SERVICE_UNAVAILABLE", "Image storage is temporarily unavailable."); }
 
 export function createApp({
   authService,
@@ -221,6 +236,7 @@ export function createApp({
   openCellService = unavailableOpenCellService,
   dashboardService = unavailableDashboardService,
   visitorService = unavailableVisitorService,
+  uploadService = unavailableUploadService,
 }: AppDependencies) {
   const app = express();
 
@@ -238,6 +254,7 @@ export function createApp({
   app.use("/api", createOpenCellRouter(authService, openCellService));
   app.use("/api", createDashboardRouter(authService, dashboardService));
   app.use("/api", createVisitorsRouter(authService, visitorService));
+  app.use("/api", createUploadsRouter(authService, uploadService));
 
   return app;
 }

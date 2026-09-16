@@ -8,6 +8,10 @@ export interface HorizonActor {
   role: AppRole
 }
 
+export interface ImageAsset {
+  imageUrl: string | null
+}
+
 export interface LifeGroupLeader {
   id: string
   isActive: boolean
@@ -818,7 +822,9 @@ async function requestApi<T>(
       cache: 'no-store',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.body && !(init.body instanceof FormData)
+          ? { 'Content-Type': 'application/json' }
+          : {}),
         ...init?.headers,
       },
     },
@@ -848,6 +854,10 @@ async function requestApi<T>(
 
 const isLifeGroupList = (value: unknown): value is LifeGroup[] =>
   Array.isArray(value) && value.every(isLifeGroup)
+
+const isImageAsset = (value: unknown): value is ImageAsset =>
+  isRecord(value) &&
+  (typeof value.imageUrl === 'string' || value.imageUrl === null)
 
 const isLeaderOptionList = (value: unknown): value is LeaderOption[] =>
   Array.isArray(value) && value.every(isLeaderOption)
@@ -977,6 +987,48 @@ export function getDashboard(accessToken: string, period: DashboardPeriod = '8',
 
 export function getMember(accessToken: string, memberId: string) {
   return requestApi(accessToken, `/members/${memberId}`, isMember)
+}
+
+function uploadImage(accessToken: string, path: string, file: File) {
+  const body = new FormData()
+  body.append('image', file)
+  return requestApi(accessToken, path, isImageAsset, { body, method: 'PUT' })
+}
+
+export function getMemberPhoto(accessToken: string, memberId: string) {
+  return requestApi(accessToken, `/members/${memberId}/photo`, isImageAsset)
+}
+
+export function uploadMemberPhoto(accessToken: string, memberId: string, file: File) {
+  return uploadImage(accessToken, `/members/${memberId}/photo`, file)
+}
+
+export function removeMemberPhoto(accessToken: string, memberId: string) {
+  return requestApi(accessToken, `/members/${memberId}/photo`, isImageAsset, { method: 'DELETE' })
+}
+
+export function getLifeGroupLogo(accessToken: string, lifeGroupId: string) {
+  return requestApi(accessToken, `/life-groups/${lifeGroupId}/logo`, isImageAsset)
+}
+
+export function uploadLifeGroupLogo(accessToken: string, lifeGroupId: string, file: File) {
+  return uploadImage(accessToken, `/life-groups/${lifeGroupId}/logo`, file)
+}
+
+export function removeLifeGroupLogo(accessToken: string, lifeGroupId: string) {
+  return requestApi(accessToken, `/life-groups/${lifeGroupId}/logo`, isImageAsset, { method: 'DELETE' })
+}
+
+export function getEventImage(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}/image`, isImageAsset)
+}
+
+export function uploadEventImage(accessToken: string, eventId: string, file: File) {
+  return uploadImage(accessToken, `/events/${eventId}/image`, file)
+}
+
+export function removeEventImage(accessToken: string, eventId: string) {
+  return requestApi(accessToken, `/events/${eventId}/image`, isImageAsset, { method: 'DELETE' })
 }
 
 export function updateMember(

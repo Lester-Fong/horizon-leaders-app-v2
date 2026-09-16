@@ -12,7 +12,7 @@ import {
 } from "./types.js";
 
 interface Config { memberService: MemberService; serviceRoleKey: string; supabaseUrl: string }
-type EventRow = Tables<"events">;
+type EventRow = Omit<Tables<"events">, "image_path">;
 
 const EVENT_COLUMNS = "id, type, status, title, event_date, location, description, counts_for_absence, created_by_profile_id, created_at, updated_at";
 

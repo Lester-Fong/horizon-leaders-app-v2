@@ -2,6 +2,8 @@ import { ArrowLeft, Check, Minus, RefreshCw, Search, UserPlus, Users } from 'luc
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { useAuth } from '../auth/useAuth'
+import { ImageAssetPanel } from '../components/uploads/ImageAssetPanel'
 import { Button, LinkButton } from '../components/ui/Button'
 import { EmptyState, ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
 import { FormField, TextInput } from '../components/ui/FormControls'
@@ -9,7 +11,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { StatusBadge } from '../components/ui/StatusBadge'
-import { ApiError, createAndRegisterHarvestVisitor, getHarvestEvent, getHarvestParticipations, getVisitors, recordHarvestInterest, registerHarvestVisitor, type HarvestEvent, type HarvestParticipation, type Visitor } from '../lib/api'
+import { ApiError, createAndRegisterHarvestVisitor, getEventImage, getHarvestEvent, getHarvestParticipations, getVisitors, recordHarvestInterest, registerHarvestVisitor, removeEventImage, uploadEventImage, type HarvestEvent, type HarvestParticipation, type Visitor } from '../lib/api'
 import { supabase } from '../lib/supabase'
 
 async function token() { const { data, error } = await supabase.auth.getSession(); if (error || !data.session) throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.'); return data.session.access_token }
@@ -19,10 +21,14 @@ function participantName(participation: HarvestParticipation) { return `${partic
 function interestLabel(value: boolean | null) { return value === true ? 'Interested' : value === false ? 'Not interested' : 'Not recorded' }
 
 export function HarvestEventPage() {
-  const { eventId } = useParams()
+  const { eventId } = useParams(); const { actor } = useAuth(); const isAdmin = actor?.role === 'admin'
   const [event, setEvent] = useState<HarvestEvent | null>(null); const [participations, setParticipations] = useState<HarvestParticipation[]>([])
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null)
   const [search, setSearch] = useState(''); const [registerOpen, setRegisterOpen] = useState(false); const [interest, setInterest] = useState<HarvestParticipation | null>(null)
+
+  const loadEventImage = useCallback(async () => eventId ? getEventImage(await token(), eventId) : { imageUrl: null }, [eventId])
+  const saveEventImage = useCallback(async (file: File) => eventId ? uploadEventImage(await token(), eventId, file) : { imageUrl: null }, [eventId])
+  const deleteEventImage = useCallback(async () => eventId ? removeEventImage(await token(), eventId) : { imageUrl: null }, [eventId])
 
   const load = useCallback(async () => {
     if (!eventId) return; setLoading(true); setError(null)
@@ -47,6 +53,19 @@ export function HarvestEventPage() {
       {notice && <FeedbackBanner className="mt-6" tone="success">{notice}</FeedbackBanner>}
       {error && <FeedbackBanner className="mt-6" tone="error">{error}</FeedbackBanner>}
       {event.status === 'closed' && <FeedbackBanner className="mt-6" tone="info">This Harvest is closed to new participation. Existing history remains readable, and Sunday-interest decisions remain available.</FeedbackBanner>}
+
+      <div className="mt-8 max-w-3xl">
+        <ImageAssetPanel
+          alt={`Image for Harvest ${event.title}`}
+          canManage={Boolean(isAdmin)}
+          description="Optional Harvest context image. Closing the Event does not remove it."
+          initials={event.title.slice(0, 2)}
+          load={loadEventImage}
+          onRemove={deleteEventImage}
+          onUpload={saveEventImage}
+          title="Harvest image"
+        />
+      </div>
 
       <section className="mt-9" aria-labelledby="harvest-roster-title">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

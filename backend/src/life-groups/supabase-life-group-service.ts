@@ -18,7 +18,7 @@ interface SupabaseLifeGroupServiceConfig {
   supabaseUrl: string;
 }
 
-type LifeGroupRow = Tables<"life_groups">;
+type LifeGroupRow = Omit<Tables<"life_groups">, "logo_path">;
 type ProfileRow = Tables<"profiles">;
 
 const LIFE_GROUP_COLUMNS =

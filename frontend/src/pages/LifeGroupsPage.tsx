@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
+import { ImageAssetPanel } from '../components/uploads/ImageAssetPanel'
 import { Button } from '../components/ui/Button'
 import {
   EmptyState,
@@ -34,9 +35,12 @@ import {
   createLifeGroup,
   getLeaderOptions,
   getLifeGroupRoster,
+  getLifeGroupLogo,
   getLifeGroups,
   setLifeGroupActive,
+  removeLifeGroupLogo,
   updateLifeGroup,
+  uploadLifeGroupLogo,
   type LeaderOption,
   type LifeGroup,
   type LifeGroupRoster,
@@ -88,6 +92,20 @@ export function LifeGroupsPage() {
   const [roster, setRoster] = useState<LifeGroupRoster | null>(null)
   const [rosterError, setRosterError] = useState<string | null>(null)
   const [isRosterLoading, setIsRosterLoading] = useState(false)
+  const imageLifeGroup = editingGroup ?? rosterGroup
+  const imageLifeGroupId = imageLifeGroup?.id ?? null
+  const loadLifeGroupLogo = useCallback(async () => {
+    if (!imageLifeGroupId) return { imageUrl: null }
+    return getLifeGroupLogo(await getAccessToken(), imageLifeGroupId)
+  }, [imageLifeGroupId])
+  const saveLifeGroupLogo = useCallback(async (file: File) => {
+    if (!imageLifeGroupId) return { imageUrl: null }
+    return uploadLifeGroupLogo(await getAccessToken(), imageLifeGroupId, file)
+  }, [imageLifeGroupId])
+  const deleteLifeGroupLogo = useCallback(async () => {
+    if (!imageLifeGroupId) return { imageUrl: null }
+    return removeLifeGroupLogo(await getAccessToken(), imageLifeGroupId)
+  }, [imageLifeGroupId])
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
@@ -408,6 +426,18 @@ export function LifeGroupsPage() {
           <FeedbackBanner tone="error">{rosterError}</FeedbackBanner>
         ) : roster ? (
           <div className="space-y-6">
+            {rosterGroup && (
+              <ImageAssetPanel
+                alt={`Logo for ${rosterGroup.name}`}
+                canManage={false}
+                description="Private Life Group identity shown within the existing Life Group visibility scope."
+                initials={rosterGroup.name.slice(0, 2)}
+                load={loadLifeGroupLogo}
+                onRemove={deleteLifeGroupLogo}
+                onUpload={saveLifeGroupLogo}
+                title="Life Group logo"
+              />
+            )}
             <div className="flex items-center justify-between gap-4 border-y border-line py-3">
               <span className="hm-label">Current people</span>
               <span className="font-mono text-xs text-muted">{roster.people.length}</span>
@@ -447,6 +477,20 @@ export function LifeGroupsPage() {
           <FeedbackBanner className="mb-5" tone="error">
             {formError}
           </FeedbackBanner>
+        )}
+        {editingGroup && (
+          <div className="mb-6">
+            <ImageAssetPanel
+              alt={`Logo for ${editingGroup.name}`}
+              canManage
+              description="Optional private logo. It remains with the Life Group if the group is archived."
+              initials={editingGroup.name.slice(0, 2)}
+              load={loadLifeGroupLogo}
+              onRemove={deleteLifeGroupLogo}
+              onUpload={saveLifeGroupLogo}
+              title="Life Group logo"
+            />
+          </div>
         )}
         <form className="space-y-5" onSubmit={handleSubmit}>
           <FormField id="life-group-name" label="Name" required>
