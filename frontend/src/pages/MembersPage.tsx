@@ -21,6 +21,7 @@ import {
   MemberFormModal,
   type MemberFormContext,
 } from '../components/members/MemberFormModal'
+import { MemberQrPanel } from '../components/members/MemberQrPanel'
 import { Button } from '../components/ui/Button'
 import {
   EmptyState,
@@ -541,6 +542,11 @@ export function MembersPage() {
               <DetailItem label="Gender" value={formatGender(detailMember.gender)} />
               <DetailItem label="Address" value={detailMember.address ?? 'Not recorded'} />
             </dl>
+            <MemberQrPanel
+              firstName={detailMember.firstName}
+              lastName={detailMember.lastName}
+              qrToken={detailMember.qrToken}
+            />
             <div className="mt-5 flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
               <Button variant="secondary" onClick={closeDetails}>
                 Close
