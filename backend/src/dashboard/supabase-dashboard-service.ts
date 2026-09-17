@@ -104,24 +104,20 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       if (groupId) memberQuery.eq("life_group_id", groupId);
       const visitorQuery = supabase.from("visitors").select("id", { count: "exact", head: true }).eq("status", "active");
       if (groupId) visitorQuery.eq("life_group_id", groupId);
-      const [membersResult, visitorsResult, followUpsResult, programmesResult] = await Promise.all([
+      const [membersResult, visitorsResult, followUpsResult, activeProgrammeCountResult, activeEnrollmentCountResult] = await Promise.all([
         memberQuery,
         visitorQuery,
         supabase.from("follow_ups").select("reason").eq("status", "active"),
-        supabase.from("opencell_programmes").select("id, name, finished_at, status").order("created_at", { ascending: false }).limit(100),
+        supabase.from("opencell_programmes").select("id", { count: "exact", head: true }).eq("status", "active"),
+        // One active enrollment per Visitor is enforced by the OpenCell schema,
+        // so an exact row count is the authoritative current-participant count.
+        supabase.from("opencell_enrollments").select("visitor_id, opencell_programmes!inner(status)", { count: "exact", head: true }).eq("opencell_programmes.status", "active"),
       ]);
-      if (membersResult.error || visitorsResult.error || followUpsResult.error || programmesResult.error) unavailable();
+      if (membersResult.error || visitorsResult.error || followUpsResult.error || activeProgrammeCountResult.error || activeEnrollmentCountResult.error) unavailable();
       const members = (membersResult.data ?? []) as MemberRow[];
       const activeVisitorCount = visitorsResult.count ?? 0;
-      const activeProgrammes = (programmesResult.data ?? []).filter((row) => row.status === "active");
-      const activeProgrammeCountResult = await supabase.from("opencell_programmes").select("id", { count: "exact", head: true }).eq("status", "active");
-      if (activeProgrammeCountResult.error) unavailable();
-      const activeProgrammeCount = activeProgrammeCountResult.count ?? activeProgrammes.length;
-      const programmeIds = activeProgrammes.map((row) => row.id);
-      const enrollmentsResult = programmeIds.length
-        ? await supabase.from("opencell_enrollments").select("visitor_id").in("programme_id", programmeIds)
-        : { data: [], error: null };
-      if (enrollmentsResult.error) unavailable();
+      const activeProgrammeCount = activeProgrammeCountResult.count ?? 0;
+      const activeParticipantCount = activeEnrollmentCountResult.count ?? 0;
 
       const month = localMonthBounds();
       const newVisitorsQuery = actor.role === "admin"
@@ -180,7 +176,7 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       const validRates = points.filter((point) => point.rate !== null).map((point) => point.rate as number);
 
       const upcomingEvents = await supabase.from("events").select("id, event_date, title, type, status").in("type", ["service", "harvest"]).gte("event_date", today).order("event_date", { ascending: true }).limit(6);
-      const upcomingSessions = programmeIds.length ? await supabase.from("opencell_sessions").select("id, programme_id, session_date, title").in("programme_id", programmeIds).eq("is_cancelled", false).gte("session_date", today).order("session_date", { ascending: true }).limit(6) : { data: [], error: null };
+      const upcomingSessions = await supabase.from("opencell_sessions").select("id, programme_id, session_date, title, opencell_programmes!inner(status)").eq("opencell_programmes.status", "active").eq("is_cancelled", false).gte("session_date", today).order("session_date", { ascending: true }).limit(6);
       const gatheringQuery = supabase.from("life_group_gatherings").select("id, gathering_date, title, life_group_id").lt("gathering_date", today).order("gathering_date", { ascending: false }).limit(6);
       if (groupId) gatheringQuery.eq("life_group_id", groupId);
       const [gatheringsResult, finishedResult] = await Promise.all([
@@ -203,7 +199,7 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
           ? { activeFollowUps: followUpsResult.data?.length ?? 0, activeMembers: members.length, activeOpenCellProgrammes: activeProgrammeCount, activeVisitors: activeVisitorCount, newVisitorsThisMonth: newVisitorsResult.count ?? 0 }
           : { activeFollowUps: followUpsResult.data?.length ?? 0, activeOpenCellProgrammes: activeProgrammeCount, myLifeGroupMembers: members.length, myLifeGroupVisitors: activeVisitorCount },
         needsAttention: { byReason: breakdown(REASONS, followUpCounts, FOLLOW_UP_REASON_LABELS, followUpsResult.data?.length ?? 0), total: followUpsResult.data?.length ?? 0 },
-        openCell: { activeProgrammes: activeProgrammeCount, currentParticipants: new Set((enrollmentsResult.data ?? []).map((row) => row.visitor_id)).size },
+        openCell: { activeProgrammes: activeProgrammeCount, currentParticipants: activeParticipantCount },
         recentUpcoming: { recent, upcoming },
         sundayAttendance: { averageRate: validRates.length ? Math.round(validRates.reduce((sum, rate) => sum + rate, 0) / validRates.length) : null, points },
       };

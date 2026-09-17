@@ -1,12 +1,4 @@
-import { CHURCH_TIME_ZONE } from "../config/constants.js";
-
-export function churchDate(now = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: CHURCH_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(now);
-  const part = (name: string) => parts.find((value) => value.type === name)!.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
+export { churchDate } from "../config/church-date.js";
 
 export function offsetDate(date: string, days: number): string {
   const result = new Date(`${date}T00:00:00Z`);

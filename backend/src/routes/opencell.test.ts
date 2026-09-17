@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.js";
 import type { AuthService } from "../auth/types.js";
 import type { OpenCellService } from "../opencell/types.js";
@@ -9,3 +9,48 @@ const programme={id,name:"Foundations",description:null,status:"active" as const
 const auth:AuthService={authenticate:vi.fn(async token=>token==="token"?{ok:true,actor:{id:programme.createdByProfileId,isActive:true,name:"Leader",role:"leader"}}:{ok:false,error:{status:401,code:"UNAUTHENTICATED",message:"Sign in required."}})};
 function service():OpenCellService{return {list:vi.fn(async()=>[programme]),getById:vi.fn(async()=>programme),create:vi.fn(async()=>programme),update:vi.fn(async()=>programme),finish:vi.fn(async()=>({programme,evaluations:[]})),listSessions:vi.fn(async()=>[]),createSession:vi.fn(async()=>({id,programmeId:id,sessionDate:"2026-09-01",title:null,location:null,notes:null,isCancelled:false,createdAt:programme.createdAt,updatedAt:programme.updatedAt,attendanceCount:0})),updateSession:vi.fn(),cancelSession:vi.fn(),listParticipants:vi.fn(async()=>[]),enroll:vi.fn(),removeEnrollment:vi.fn(),listAttendance:vi.fn(async()=>[]),addAttendance:vi.fn(),removeAttendance:vi.fn()};}
 describe("OpenCell routes",()=>{it("allows either authenticated role to list and validates programme input",async()=>{const s=service();const app=createApp({authService:auth,openCellService:s});const listed=await request(app).get("/api/opencell/programmes").set("Authorization","Bearer token");expect(listed.status).toBe(200);expect(listed.body.data).toHaveLength(1);const invalid=await request(app).post("/api/opencell/programmes").set("Authorization","Bearer token").send({description:"missing name"});expect(invalid.status).toBe(400);});});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("OpenCell enrollment date defaults", () => {
+  it("uses the Asia/Manila date when UTC is still the previous calendar day", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-16T16:30:00.000Z"));
+    const s = service();
+    const app = createApp({ authService: auth, openCellService: s });
+
+    const response = await request(app)
+      .post(`/api/opencell/programmes/${id}/participants`)
+      .set("Authorization", "Bearer token")
+      .send({ visitorId: "33333333-3333-4333-8333-333333333333" });
+
+    expect(response.status).toBe(201);
+    expect(s.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "leader" }),
+      id,
+      "33333333-3333-4333-8333-333333333333",
+      "2026-09-17",
+    );
+  });
+
+  it("rolls over at Manila midnight and preserves an explicit enrollment date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-16T16:00:00.000Z"));
+    const s = service();
+    const app = createApp({ authService: auth, openCellService: s });
+
+    await request(app)
+      .post(`/api/opencell/programmes/${id}/participants`)
+      .set("Authorization", "Bearer token")
+      .send({ visitorId: "33333333-3333-4333-8333-333333333333", enrolledOn: "2026-01-02" });
+
+    expect(s.enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "leader" }),
+      id,
+      "33333333-3333-4333-8333-333333333333",
+      "2026-01-02",
+    );
+  });
+});
