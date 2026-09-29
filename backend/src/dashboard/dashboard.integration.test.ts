@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { HorizonActor } from "../auth/types.js";
@@ -18,6 +19,8 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
   const programmeIds: string[] = [];
   const sessionIds: string[] = [];
   const visitorIds: string[] = [];
+  const groupIds: string[] = [];
+  const memberIds: string[] = [];
 
   afterEach(async () => {
     if (sessionIds.length) {
@@ -29,7 +32,15 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
       await db.from("opencell_programmes").delete().in("id", programmeIds);
     }
     if (visitorIds.length) {
+      await db.from("follow_ups").delete().in("visitor_id", visitorIds);
       await db.from("visitors").delete().in("id", visitorIds);
+    }
+    if (memberIds.length) {
+      await db.from("follow_ups").delete().in("member_id", memberIds);
+      await db.from("members").delete().in("id", memberIds);
+    }
+    if (groupIds.length) {
+      await db.from("life_groups").delete().in("id", groupIds);
     }
     for (const userId of users.splice(0).reverse()) {
       await db.auth.admin.deleteUser(userId);
@@ -37,6 +48,8 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
     programmeIds.splice(0);
     sessionIds.splice(0);
     visitorIds.splice(0);
+    groupIds.splice(0);
+    memberIds.splice(0);
   });
 
   it("counts active participants and upcoming sessions beyond the first 100 programmes", async () => {
@@ -83,5 +96,51 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
     expect(after.openCell.activeProgrammes).toBe(before.openCell.activeProgrammes + 101);
     expect(after.openCell.currentParticipants).toBe(before.openCell.currentParticipants + 1);
     expect(after.recentUpcoming.upcoming.some((item) => item.id === session.data.id)).toBe(true);
+  });
+
+  it("keeps Leader metrics scoped to the own Life Group despite filter input", async () => {
+    const leaderUser = await db.auth.admin.createUser({
+      email: `dashboard-leader-${Date.now()}@example.test`,
+      email_confirm: true,
+      password: "Dashboard-Aa1!",
+    });
+    if (leaderUser.error || !leaderUser.data.user) throw leaderUser.error ?? new Error("Leader missing");
+    users.push(leaderUser.data.user.id);
+    const otherLeader = await db.auth.admin.createUser({
+      email: `dashboard-other-${Date.now()}@example.test`,
+      email_confirm: true,
+      password: "Dashboard-Aa1!",
+    });
+    if (otherLeader.error || !otherLeader.data.user) throw otherLeader.error ?? new Error("Other leader missing");
+    users.push(otherLeader.data.user.id);
+
+    const groups = await db.from("life_groups").insert([
+      { name: "Dashboard Leader Group", leader_profile_id: leaderUser.data.user.id },
+      { name: "Dashboard Other Group", leader_profile_id: otherLeader.data.user.id },
+    ]).select("id, leader_profile_id");
+    if (groups.error) throw groups.error;
+    groupIds.push(...groups.data.map((group) => group.id));
+    const ownGroup = groups.data.find((group) => group.leader_profile_id === leaderUser.data.user!.id)!;
+    const otherGroup = groups.data.find((group) => group.leader_profile_id === otherLeader.data.user!.id)!;
+
+    const members = await db.from("members").insert([
+      { first_name: "Own", last_name: "Member", life_group_id: ownGroup.id, qr_token: randomUUID() },
+      { first_name: "Other", last_name: "Member", life_group_id: otherGroup.id, qr_token: randomUUID() },
+    ]).select("id");
+    if (members.error) throw members.error;
+    memberIds.push(...members.data.map((member) => member.id));
+    const visitors = await db.from("visitors").insert([
+      { first_name: "Own", last_name: "Visitor", life_group_id: ownGroup.id, status: "active" },
+      { first_name: "Other", last_name: "Visitor", life_group_id: otherGroup.id, status: "active" },
+    ]).select("id");
+    if (visitors.error) throw visitors.error;
+    visitorIds.push(...visitors.data.map((visitor) => visitor.id));
+
+    const service = createSupabaseDashboardService({ serviceRoleKey: key!, supabaseUrl: url! });
+    const actor: HorizonActor = { id: leaderUser.data.user.id, isActive: true, name: "Dashboard Leader", role: "leader" };
+    const data = await service.get(actor, { period: "8", lifeGroupId: otherGroup.id });
+    expect(data.metrics.myLifeGroupMembers).toBe(1);
+    expect(data.metrics.myLifeGroupVisitors).toBe(1);
+    expect(data.memberSnapshot.gender.reduce((total, row) => total + row.count, 0)).toBe(1);
   });
 });

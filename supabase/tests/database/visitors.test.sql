@@ -252,10 +252,10 @@ end;
 $$;
 select pass('converted_member_id requires an existing Member');
 
-insert into public.visitors (first_name, last_name)
+insert into public.visitors (id, first_name, last_name)
 values
-  ('No', 'Contact'),
-  ('No', 'Contact');
+  ('95555555-5555-4555-8555-555555555551', 'No', 'Contact'),
+  ('95555555-5555-4555-8555-555555555552', 'No', 'Contact');
 select is(
   (
     select count(*)
@@ -269,10 +269,11 @@ select is(
   (
     select count(*)
     from public.visitors
-    where phone is null and email is null
+    where id in ('95555555-5555-4555-8555-555555555551', '95555555-5555-4555-8555-555555555552')
+      and phone is null and email is null
   ),
   2::bigint,
-  'nullable Visitor contacts do not conflict'
+  'nullable Visitor contacts do not conflict for the two fixture rows'
 );
 
 do $$

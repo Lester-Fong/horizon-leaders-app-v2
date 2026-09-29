@@ -200,4 +200,25 @@ describe("Visitor API", () => {
     expect(repeated.status).toBe(409);
     expect(repeated.body.error.code).toBe("VISITOR_NOT_ACTIVE");
   });
+
+  it("returns an actionable conflict when active OpenCell enrollment blocks conversion", async () => {
+    const visitorService = createVisitorService();
+    vi.mocked(visitorService.convert).mockRejectedValueOnce(new VisitorServiceError(
+      409,
+      "ACTIVE_OPENCELL_ENROLLMENT",
+      "Finish the Visitor's active OpenCell Programme before converting them to a Member.",
+    ));
+    const { app } = createTestApp(visitorService);
+
+    const response = await request(app)
+      .post(`/api/visitors/${visitorId}/convert`)
+      .set("Authorization", "Bearer admin-token")
+      .send({ lifeGroupId: groupId });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toEqual({
+      code: "ACTIVE_OPENCELL_ENROLLMENT",
+      message: "Finish the Visitor's active OpenCell Programme before converting them to a Member.",
+    });
+  });
 });
