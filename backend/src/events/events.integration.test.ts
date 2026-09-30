@@ -66,7 +66,22 @@ describeLocal("Sunday Service API with local Supabase", () => {
     expect((await api("leaderA", "post", `/api/events/${eventId}/close`)).status).toBe(403);
 
     const attendancePath = `/api/events/${eventId}/attendance`;
-    expect((await api("leaderA", "post", attendancePath).send({ memberId: memberA.id })).status).toBe(201);
+    const concurrentCheckIns = await Promise.all([
+      api("leaderA", "post", attendancePath).send({ memberId: memberA.id }),
+      api("leaderA", "post", `${attendancePath}/qr`).send({ qrToken: memberA.qrToken }),
+    ]);
+    expect(concurrentCheckIns.every(({ status }) => status === 201)).toBe(true);
+    expect(concurrentCheckIns.map(({ body }) => body.data.result).sort()).toEqual([
+      "already_present",
+      "recorded",
+    ]);
+    const concurrentPresence = await client
+      .from("sunday_service_presence")
+      .select("member_id", { count: "exact", head: true })
+      .eq("event_id", eventId)
+      .eq("member_id", memberA.id);
+    if (concurrentPresence.error) throw concurrentPresence.error;
+    expect(concurrentPresence.count).toBe(1);
     const duplicateQr = await api("leaderA", "post", `${attendancePath}/qr`).send({ qrToken: memberA.qrToken });
     expect(duplicateQr.status).toBe(201); expect(duplicateQr.body.data.result).toBe("already_present");
     const otherQr = await api("leaderA", "post", `${attendancePath}/qr`).send({ qrToken: memberB.qrToken });
