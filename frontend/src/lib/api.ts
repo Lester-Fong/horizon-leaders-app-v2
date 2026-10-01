@@ -268,6 +268,11 @@ export interface SundayAttendanceMember {
   phone: string | null
 }
 
+export interface SundayQrCheckInResult {
+  member: SundayAttendanceMember
+  result: 'recorded' | 'already_present'
+}
+
 export interface SundayVisitorRegistration {
   createdAt: string
   registeredBy: { id: string; name: string }
@@ -922,7 +927,7 @@ const isAttendanceResult = (
 
 const isQrAttendanceResult = (
   value: unknown,
-): value is { member: SundayAttendanceMember; result: 'recorded' | 'already_present' } =>
+): value is SundayQrCheckInResult =>
   isRecord(value) && isSundayAttendanceMember(value.member) && ['recorded', 'already_present'].includes(String(value.result))
 
 const isVisitorRegistrationResult = (

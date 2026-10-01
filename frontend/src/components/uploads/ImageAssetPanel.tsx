@@ -122,7 +122,7 @@ export function ImageAssetPanel({
               onError={() => setImageUrl(null)}
             />
           ) : (
-            <span className="font-mono text-lg font-semibold uppercase tracking-wider text-muted" aria-label={`${alt} placeholder`}>
+            <span className="font-mono text-lg font-semibold uppercase tracking-wider text-muted-strong" aria-label={`${alt} placeholder`}>
               {isLoading ? <Image aria-hidden="true" className="size-5" /> : initials.slice(0, 3)}
             </span>
           )}

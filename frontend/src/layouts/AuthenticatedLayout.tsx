@@ -270,7 +270,9 @@ export function AuthenticatedLayout() {
             <p className="hidden max-w-52 truncate text-xs font-medium text-muted sm:block">
               {actor.name}
             </p>
-            <span className="size-1.5 rounded-full bg-ink" aria-label="Account active" />
+            <span className="size-1.5 rounded-full bg-ink">
+              <span className="sr-only">Account active</span>
+            </span>
           </div>
         </header>
 

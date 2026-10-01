@@ -94,6 +94,50 @@ On January dates, the This Year chart naturally contains only qualifying Sundays
 already elapsed in that year; Last 4/8/12 retains the cross-year history.
 Targeted seeder tests: `npm --prefix backend test -- src/demo/demo.test.ts`.
 
+## Browser end-to-end tests
+
+QA-003 uses Playwright with the installed Microsoft Edge Chromium channel. With
+Docker running and the local frontend/backend environment files configured, run
+the deterministic seeded suite from the repository root:
+
+```bash
+npm run test:e2e:seeded
+```
+
+This command intentionally resets only the guarded loopback Supabase project,
+seeds the local demo church, starts the frontend/backend test servers, and runs
+the critical Admin and Leader browser journeys. To rerun against the current
+already-seeded local database without another reset, use `npm run test:e2e`.
+
+QA-005 adds automated accessibility/responsive checks plus Edge, Firefox, and
+WebKit browser coverage:
+
+```bash
+npm run test:e2e:qa005
+```
+
+Sunday QR camera access is requested only after `Start camera`. Production use
+requires HTTPS; localhost is suitable for development. The connected-scanner
+input and manual attendance remain available when camera access is denied or no
+camera exists.
+
+Manual phone/tablet camera check after starting the local app (or an HTTPS test
+deployment):
+
+1. Sign in, open an open Sunday Service, then open `QR check-in`.
+2. Choose `Camera`, press `Start camera`, and grant permission; confirm the rear
+   camera is selected where the device supports it.
+3. Scan a downloaded Member QR and confirm the Member success message and
+   attendance refresh without closing the scanner.
+4. Keep the same code in frame to confirm requests are not spammed, then scan it
+   again after a pause to confirm the normal `already present` response.
+5. Scan another authorized Member, then try an unknown or out-of-scope QR and
+   confirm safe feedback without identity disclosure.
+6. Press `Stop camera`, close the dialog, and navigate away; confirm the device
+   camera indicator turns off each time.
+7. Deny permission once and confirm `Scanner input` still accepts a connected
+   USB/Bluetooth scanner with Enter submission.
+
 ## Frontend
 
 Copy `frontend/.env.example` to `frontend/.env.local` and use only the local browser-safe Supabase publishable (or legacy anon) key reported by `supabase status`. Never put a service-role or secret key in a `VITE_` variable.

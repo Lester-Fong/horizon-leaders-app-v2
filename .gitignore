@@ -5,6 +5,8 @@
 **/dist/
 **/coverage/
 *.tsbuildinfo
+/playwright-report/
+/test-results/
 
 # Runtime environment files and secrets
 **/.env

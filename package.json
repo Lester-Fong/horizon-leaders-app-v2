@@ -8,6 +8,9 @@
   "scripts": {
     "demo:seed": "npm --prefix backend run demo:seed",
     "demo:reset": "npm --prefix backend run demo:reset",
+    "test:e2e": "playwright test",
+    "test:e2e:qa005": "playwright test --config=playwright.qa005.config.ts",
+    "test:e2e:seeded": "npm run demo:reset && playwright test",
     "supabase": "supabase",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
@@ -16,6 +19,8 @@
     "supabase:types": "supabase gen types typescript --local --schema public > backend/src/types/database.types.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "supabase": "2.114.0"
   }
 }

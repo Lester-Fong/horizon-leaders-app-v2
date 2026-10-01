@@ -13,7 +13,7 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive'
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 const baseClasses =
-  'inline-flex items-center justify-center gap-2 rounded-control font-semibold transition-[background-color,color,border-color,opacity] duration-200 ease-out disabled:cursor-not-allowed disabled:opacity-50'
+  'inline-flex items-center justify-center gap-2 rounded-control font-semibold transition-[background-color,color,border-color,opacity] duration-200 ease-out disabled:cursor-not-allowed disabled:opacity-60'
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'border border-ink bg-ink text-canvas hover:bg-near-ink',

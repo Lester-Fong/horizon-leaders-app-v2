@@ -5,6 +5,7 @@ import {
   useRef,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -27,6 +28,7 @@ interface ModalProps {
   isOpen: boolean
   onClose(): void
   preventClose?: boolean
+  returnFocusRef?: RefObject<HTMLElement | null>
   title: string
 }
 
@@ -37,6 +39,7 @@ export function Modal({
   isOpen,
   onClose,
   preventClose = false,
+  returnFocusRef,
   title,
 }: ModalProps) {
   const titleId = useId()
@@ -53,10 +56,11 @@ export function Modal({
   useEffect(() => {
     if (!isOpen) return
 
-    const previouslyFocused =
+    const previouslyFocused = returnFocusRef?.current ?? (
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
+    )
     const root = document.getElementById('root')
     const previousOverflow = document.body.style.overflow
 
@@ -112,8 +116,16 @@ export function Modal({
       document.body.style.overflow = previousOverflow
       if (root) root.inert = false
       previouslyFocused?.focus()
+      window.setTimeout(() => {
+        if (
+          previouslyFocused?.isConnected &&
+          (document.activeElement === document.body || !document.activeElement)
+        ) {
+          previouslyFocused.focus()
+        }
+      }, 0)
     }
-  }, [isOpen])
+  }, [isOpen, returnFocusRef])
 
   if (!isOpen) return null
 
