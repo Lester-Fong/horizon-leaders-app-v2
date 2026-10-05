@@ -13,14 +13,14 @@ import {
   ApiError,
   type AppRole,
   type LifeGroup,
-  type Member,
+  type MemberSummary,
   type MemberGender,
   type MemberInput,
 } from '../../lib/api'
 
 export type MemberFormContext =
   | { mode: 'create' }
-  | { member: Member; mode: 'edit' }
+  | { member: MemberSummary; mode: 'edit' }
 
 interface MemberFormState {
   address: string
@@ -45,8 +45,8 @@ interface MemberFormModalProps {
   context: MemberFormContext
   lifeGroups: LifeGroup[]
   onClose(): void
-  onSave(input: MemberInput): Promise<Member>
-  onSaved(member: Member): void
+  onSave(input: MemberInput): Promise<MemberSummary>
+  onSaved(member: MemberSummary): void
 }
 
 function getInitialForm(

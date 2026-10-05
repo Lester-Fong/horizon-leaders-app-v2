@@ -25,6 +25,8 @@ export interface Member {
   updatedAt: string;
 }
 
+export type MemberSummary = Omit<Member, "qrToken">;
+
 export interface CreateMemberInput {
   address: string | null;
   birthDate: string | null;

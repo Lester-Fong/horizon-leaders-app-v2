@@ -151,7 +151,14 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     trackVisitor(converted);
     expect(converted.body.data.visitor).toMatchObject({ convertedMemberId: converted.body.data.member.id, id: firstId, lifeGroup: { id: groupAId }, status: "converted" });
     expect(converted.body.data.member).toMatchObject({ address: null, birthDate: null, email: "VISITOR.ONE@Example.Test", firstName: "Maria", gender: null, isActive: true, lastName: "One", lifeGroup: { id: groupAId }, phone: "0917 111 2233" });
-    expect(converted.body.data.member.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(converted.body.data.member).not.toHaveProperty("qrToken");
+    const convertedMemberDetail = await asActor(
+      "admin-token",
+      "get",
+      `/api/members/${converted.body.data.member.id}`,
+    );
+    expect(convertedMemberDetail.status).toBe(200);
+    expect(convertedMemberDetail.body.data.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const leaderHiddenList = await asActor("leader-a-token", "get", "/api/visitors?status=all&search=Maria");
     const leaderHiddenDetail = await asActor("leader-a-token", "get", `/api/visitors/${firstId}`);

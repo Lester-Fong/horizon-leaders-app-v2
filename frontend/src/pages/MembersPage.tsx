@@ -49,6 +49,7 @@ import {
   removeMemberPhoto,
   type LifeGroup,
   type Member,
+  type MemberSummary,
   type MemberInput,
   type MemberListStatus,
   type MemberAgeFilter,
@@ -77,7 +78,7 @@ function formatBirthDate(birthDate: string | null) {
   }).format(new Date(`${birthDate}T00:00:00.000Z`))
 }
 
-function formatGender(gender: Member['gender']) {
+function formatGender(gender: MemberSummary['gender']) {
   if (!gender) return 'Not recorded'
   return gender === 'male' ? 'Male' : 'Female'
 }
@@ -95,7 +96,7 @@ export function MembersPage() {
   const { actor } = useAuth()
   const [searchParams] = useSearchParams()
   const isAdmin = actor?.role === 'admin'
-  const [members, setMembers] = useState<Member[]>([])
+  const [members, setMembers] = useState<MemberSummary[]>([])
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -120,7 +121,7 @@ export function MembersPage() {
   const [detailMember, setDetailMember] = useState<Member | null>(null)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
-  const [archiveTarget, setArchiveTarget] = useState<Member | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<MemberSummary | null>(null)
   const [isArchiving, setIsArchiving] = useState(false)
 
   const detailMemberImageId = detailMember?.id ?? null
@@ -191,7 +192,7 @@ export function MembersPage() {
     setSearch('')
   }
 
-  async function openDetails(member: Member) {
+  async function openDetails(member: MemberSummary) {
     setDetailMemberId(member.id)
     setDetailMember(null)
     setDetailError(null)
@@ -213,13 +214,13 @@ export function MembersPage() {
     setDetailError(null)
   }
 
-  function openEdit(member: Member) {
+  function openEdit(member: MemberSummary) {
     setDetailMemberId(null)
     setDetailMember(null)
     setFormContext({ member, mode: 'edit' })
   }
 
-  function getRowActions(member: Member): RowAction[] {
+  function getRowActions(member: MemberSummary): RowAction[] {
     const actions: RowAction[] = [
       {
         icon: Eye,
@@ -250,7 +251,7 @@ export function MembersPage() {
     return createMember(token, input)
   }
 
-  function handleMemberSaved(member: Member) {
+  function handleMemberSaved(member: MemberSummary) {
     const wasEditing = formContext?.mode === 'edit'
     setFormContext(null)
     setNotice(

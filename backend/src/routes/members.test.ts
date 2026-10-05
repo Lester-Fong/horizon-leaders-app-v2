@@ -101,6 +101,7 @@ describe("Member API read and mutation boundary", () => {
 
     expect(defaultResponse.status).toBe(200);
     expect(defaultResponse.headers["cache-control"]).toBe("private, no-store");
+    expect(defaultResponse.body.data[0]).not.toHaveProperty("qrToken");
     expect(filteredResponse.status).toBe(200);
     expect(memberService.list).toHaveBeenNthCalledWith(1, actors.admin, {
       status: "active",
@@ -152,6 +153,7 @@ describe("Member API read and mutation boundary", () => {
       .set("Authorization", "Bearer admin-token");
 
     expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.data.qrToken).toBe("opaque-token");
     expect(memberService.getById).toHaveBeenCalledWith(
       actors.leader,
       memberId,
@@ -184,6 +186,8 @@ describe("Member API read and mutation boundary", () => {
 
     expect(adminResponse.status).toBe(201);
     expect(leaderResponse.status).toBe(201);
+    expect(adminResponse.body.data).not.toHaveProperty("qrToken");
+    expect(leaderResponse.body.data).not.toHaveProperty("qrToken");
     expect(memberService.create).toHaveBeenNthCalledWith(1, actors.admin, {
       address: "Manila",
       birthDate: "1990-04-12",
@@ -247,6 +251,8 @@ describe("Member API read and mutation boundary", () => {
 
     expect(adminResponse.status).toBe(200);
     expect(leaderResponse.status).toBe(200);
+    expect(adminResponse.body.data).not.toHaveProperty("qrToken");
+    expect(leaderResponse.body.data).not.toHaveProperty("qrToken");
     expect(memberService.update).toHaveBeenNthCalledWith(1, actors.admin, memberId, {
       firstName: "Ann",
       lifeGroupId: otherGroupId,
@@ -295,6 +301,7 @@ describe("Member API read and mutation boundary", () => {
     expect(leaderResponse.status).toBe(403);
     expect(adminResponse.status).toBe(200);
     expect(adminResponse.body.data.isActive).toBe(false);
+    expect(adminResponse.body.data).not.toHaveProperty("qrToken");
     expect(memberService.archive).toHaveBeenCalledOnce();
   });
 

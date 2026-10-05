@@ -2,6 +2,7 @@ import { Router, type Response } from "express";
 
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
+import { toMemberSummary } from "../members/member-projection.js";
 import {
   MemberServiceError,
   type CreateMemberInput,
@@ -256,7 +257,9 @@ export function createMembersRouter(
       };
       response.set("Cache-Control", "private, no-store");
       await handleRequest(response, () =>
-        memberService.list(request.actor!, options),
+        memberService.list(request.actor!, options).then((members) =>
+          members.map(toMemberSummary),
+        ),
       );
       return;
     }
@@ -308,7 +311,9 @@ export function createMembersRouter(
     if (age) options.age = age;
     response.set("Cache-Control", "private, no-store");
     await handleRequest(response, () =>
-      memberService.list(request.actor!, options),
+      memberService.list(request.actor!, options).then((members) =>
+        members.map(toMemberSummary),
+      ),
     );
   });
 
@@ -363,7 +368,7 @@ export function createMembersRouter(
 
     await handleRequest(
       response,
-      () => memberService.create(request.actor!, input),
+      () => memberService.create(request.actor!, input).then(toMemberSummary),
       201,
     );
   });
@@ -403,7 +408,7 @@ export function createMembersRouter(
       }
 
       await handleRequest(response, () =>
-        memberService.update(request.actor!, memberId, update),
+        memberService.update(request.actor!, memberId, update).then(toMemberSummary),
       );
     },
   );
@@ -424,7 +429,9 @@ export function createMembersRouter(
         return;
       }
 
-      await handleRequest(response, () => memberService.archive(memberId));
+      await handleRequest(response, () =>
+        memberService.archive(memberId).then(toMemberSummary),
+      );
     },
   );
 

@@ -1,5 +1,8 @@
 import cors from "cors";
-import express from "express";
+import express, {
+  type ErrorRequestHandler,
+  type RequestHandler,
+} from "express";
 
 import type { AuthService } from "./auth/types.js";
 import { EventServiceError, type EventService } from "./events/types.js";
@@ -59,6 +62,57 @@ export interface AppDependencies {
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
+const JSON_BODY_LIMIT = "100kb";
+
+const applyApiSecurityHeaders: RequestHandler = (_request, response, next) => {
+  response.set({
+    "Cache-Control": "private, no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+  });
+  next();
+};
+
+interface BodyParserError extends Error {
+  status?: number;
+  type?: string;
+}
+
+const handleApiError: ErrorRequestHandler = (
+  error: BodyParserError,
+  _request,
+  response,
+  _next,
+) => {
+  void _next;
+  if (error.type === "entity.parse.failed") {
+    response.status(400).json({
+      error: {
+        code: "INVALID_JSON",
+        message: "Request body must contain valid JSON.",
+      },
+    });
+    return;
+  }
+
+  if (error.type === "entity.too.large" || error.status === 413) {
+    response.status(413).json({
+      error: {
+        code: "REQUEST_TOO_LARGE",
+        message: "Request body exceeds the allowed size.",
+      },
+    });
+    return;
+  }
+
+  response.status(500).json({
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The request could not be completed.",
+    },
+  });
+};
 
 const unavailableEventService: EventService = {
   addAttendance: async () => unavailableEvent(),
@@ -240,8 +294,10 @@ export function createApp({
 }: AppDependencies) {
   const app = express();
 
+  app.disable("x-powered-by");
   app.use(cors({ origin: frontendOrigin }));
-  app.use(express.json());
+  app.use("/api", applyApiSecurityHeaders);
+  app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use("/api", healthRouter);
   app.use("/api", createMeRouter(authService));
   app.use("/api", createHarvestsRouter(authService, harvestService));
@@ -255,6 +311,15 @@ export function createApp({
   app.use("/api", createDashboardRouter(authService, dashboardService));
   app.use("/api", createVisitorsRouter(authService, visitorService));
   app.use("/api", createUploadsRouter(authService, uploadService));
+  app.use("/api", (_request, response) => {
+    response.status(404).json({
+      error: {
+        code: "API_ROUTE_NOT_FOUND",
+        message: "The requested API route does not exist.",
+      },
+    });
+  });
+  app.use(handleApiError);
 
   return app;
 }

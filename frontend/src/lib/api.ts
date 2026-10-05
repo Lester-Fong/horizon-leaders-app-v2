@@ -64,7 +64,7 @@ export interface MemberLifeGroup {
   name: string
 }
 
-export interface Member {
+export interface MemberSummary {
   address: string | null
   birthDate: string | null
   createdAt: string
@@ -76,8 +76,11 @@ export interface Member {
   lastName: string
   lifeGroup: MemberLifeGroup
   phone: string | null
-  qrToken: string
   updatedAt: string
+}
+
+export interface Member extends MemberSummary {
+  qrToken: string
 }
 
 export interface MemberInput {
@@ -360,7 +363,7 @@ export interface VisitorListFilters {
 }
 
 export interface VisitorConversionResult {
-  member: Member
+  member: MemberSummary
   visitor: Visitor
 }
 
@@ -487,7 +490,7 @@ function isMemberLifeGroup(value: unknown): value is MemberLifeGroup {
   )
 }
 
-function isMember(value: unknown): value is Member {
+function isMemberSummary(value: unknown): value is MemberSummary {
   return (
     isRecord(value) &&
     (typeof value.address === 'string' || value.address === null) &&
@@ -501,8 +504,14 @@ function isMember(value: unknown): value is Member {
     typeof value.lastName === 'string' &&
     isMemberLifeGroup(value.lifeGroup) &&
     (typeof value.phone === 'string' || value.phone === null) &&
-    typeof value.qrToken === 'string' &&
     typeof value.updatedAt === 'string'
+  )
+}
+
+function isMember(value: unknown): value is Member {
+  return (
+    isMemberSummary(value) &&
+    typeof (value as MemberSummary & { qrToken?: unknown }).qrToken === 'string'
   )
 }
 
@@ -767,7 +776,7 @@ function isVisitor(value: unknown): value is Visitor {
 }
 
 function isVisitorConversionResult(value: unknown): value is VisitorConversionResult {
-  return isRecord(value) && isMember(value.member) && isVisitor(value.visitor)
+  return isRecord(value) && isMemberSummary(value.member) && isVisitor(value.visitor)
 }
 
 function isFollowUp(value: unknown): value is FollowUp {
@@ -867,8 +876,8 @@ const isImageAsset = (value: unknown): value is ImageAsset =>
 const isLeaderOptionList = (value: unknown): value is LeaderOption[] =>
   Array.isArray(value) && value.every(isLeaderOption)
 
-const isMemberList = (value: unknown): value is Member[] =>
-  Array.isArray(value) && value.every(isMember)
+const isMemberList = (value: unknown): value is MemberSummary[] =>
+  Array.isArray(value) && value.every(isMemberSummary)
 
 const isDashboard = (value: unknown): value is DashboardData => {
   if (!isRecord(value) || !isRecord(value.metrics) || !isRecord(value.memberSnapshot) || !isRecord(value.needsAttention) || !isRecord(value.openCell) || !isRecord(value.recentUpcoming) || !isRecord(value.sundayAttendance)) return false
@@ -962,7 +971,7 @@ export function createLifeGroup(
 }
 
 export function createMember(accessToken: string, input: MemberInput) {
-  return requestApi(accessToken, '/members', isMember, {
+  return requestApi(accessToken, '/members', isMemberSummary, {
     body: JSON.stringify(input),
     method: 'POST',
   })
@@ -1041,14 +1050,14 @@ export function updateMember(
   memberId: string,
   input: MemberInput,
 ) {
-  return requestApi(accessToken, `/members/${memberId}`, isMember, {
+  return requestApi(accessToken, `/members/${memberId}`, isMemberSummary, {
     body: JSON.stringify(input),
     method: 'PATCH',
   })
 }
 
 export function archiveMember(accessToken: string, memberId: string) {
-  return requestApi(accessToken, `/members/${memberId}/archive`, isMember, {
+  return requestApi(accessToken, `/members/${memberId}/archive`, isMemberSummary, {
     method: 'PATCH',
   })
 }

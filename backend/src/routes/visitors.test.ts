@@ -153,7 +153,7 @@ describe("Visitor API", () => {
     const converted = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer leader-token").send({ lifeGroupId: groupId });
     const controlled = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer admin-token").send({ lifeGroupId: groupId, qrToken: "chosen" });
     expect(converted.status).toBe(201);
-    expect(converted.body.data.member.qrToken).toBe("opaque-server-token");
+    expect(converted.body.data.member).not.toHaveProperty("qrToken");
     expect(controlled.status).toBe(400);
     expect(visitorService.convert).toHaveBeenCalledTimes(1);
     expect(visitorService.convert).toHaveBeenCalledWith(actors.leader, visitorId, groupId);

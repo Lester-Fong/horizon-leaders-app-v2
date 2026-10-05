@@ -46,7 +46,7 @@ import {
   getMinistryMembers,
   removeMemberFromMinistry,
   updateMinistry,
-  type Member,
+  type MemberSummary,
   type Ministry,
   type MinistryInput,
   type MinistryListStatus,
@@ -67,7 +67,7 @@ function getErrorMessage(error: unknown) {
   return 'Ministry data is unavailable right now. Please try again.'
 }
 
-function memberName(member: MinistryMember | Member) {
+function memberName(member: MinistryMember | MemberSummary) {
   return `${member.firstName} ${member.lastName}`
 }
 
@@ -100,7 +100,7 @@ export function MinistriesPage() {
   const [isArchiving, setIsArchiving] = useState(false)
   const [assignmentTarget, setAssignmentTarget] = useState<Ministry | null>(null)
   const [assignedMembers, setAssignedMembers] = useState<MinistryMember[]>([])
-  const [candidateMembers, setCandidateMembers] = useState<Member[]>([])
+  const [candidateMembers, setCandidateMembers] = useState<MemberSummary[]>([])
   const [candidateSearch, setCandidateSearch] = useState('')
   const [candidateId, setCandidateId] = useState('')
   const [assignmentError, setAssignmentError] = useState<string | null>(null)

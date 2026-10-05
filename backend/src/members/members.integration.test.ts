@@ -156,8 +156,15 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     expect(adminCreated.status).toBe(201);
     const adminMemberId = trackMember(adminCreated)!;
     expect(adminCreated.body.data.lifeGroup.id).toBe(groupBId);
-    expect(adminCreated.body.data.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const permanentQrToken = adminCreated.body.data.qrToken;
+    expect(adminCreated.body.data).not.toHaveProperty("qrToken");
+    const adminMemberDetail = await asActor(
+      "admin-token",
+      "get",
+      `/api/members/${adminMemberId}`,
+    );
+    expect(adminMemberDetail.status).toBe(200);
+    expect(adminMemberDetail.body.data.qrToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const permanentQrToken = adminMemberDetail.body.data.qrToken;
 
     const leaderCreated = await asActor(
       "leader-a-token",
@@ -171,12 +178,13 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     expect(leaderCreated.status).toBe(201);
     const leaderMemberId = trackMember(leaderCreated)!;
 
+    const ownArchivedEmail = `archived-own-${randomUUID()}@example.test`;
     const ownArchived = await asActor(
       "admin-token",
       "post",
       "/api/members",
     ).send({
-      email: "archived-own@example.test",
+      email: ownArchivedEmail,
       firstName: "Archived",
       lastName: "Own Group",
       lifeGroupId: groupAId,
@@ -198,7 +206,7 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     const adminArchivedList = await asActor(
       "admin-token",
       "get",
-      "/api/members?status=archived",
+      `/api/members?status=archived&search=${encodeURIComponent(ownArchivedEmail)}`,
     );
     const adminGroupList = await asActor(
       "admin-token",
@@ -368,7 +376,7 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     ).send({ firstName: "Ana Maria", lifeGroupId: groupAId });
     expect(adminEditAndMove.status).toBe(200);
     expect(adminEditAndMove.body.data.lifeGroup.id).toBe(groupAId);
-    expect(adminEditAndMove.body.data.qrToken).toBe(permanentQrToken);
+    expect(adminEditAndMove.body.data).not.toHaveProperty("qrToken");
 
     const leaderArchive = await asActor(
       "leader-a-token",
@@ -383,7 +391,7 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     expect(leaderArchive.status).toBe(403);
     expect(adminArchive.status).toBe(200);
     expect(adminArchive.body.data.isActive).toBe(false);
-    expect(adminArchive.body.data.qrToken).toBe(permanentQrToken);
+    expect(adminArchive.body.data).not.toHaveProperty("qrToken");
 
     const badGender = await asActor("admin-token", "post", "/api/members").send({
       firstName: "Bad",
@@ -446,8 +454,16 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     trackMember(retriedCollisionMember);
     expect(firstCollisionMember.status).toBe(201);
     expect(retriedCollisionMember.status).toBe(201);
-    expect(retriedCollisionMember.body.data.qrToken).toBe("fresh-token");
+    expect(retriedCollisionMember.body.data).not.toHaveProperty("qrToken");
     expect(generateQrToken).toHaveBeenCalledTimes(3);
+
+    const { data: retriedStoredMember, error: retriedStoredMemberError } = await adminClient
+      .from("members")
+      .select("qr_token")
+      .eq("id", retriedCollisionMember.body.data.id)
+      .single();
+    if (retriedStoredMemberError) throw retriedStoredMemberError;
+    expect(retriedStoredMember.qr_token).toBe("fresh-token");
 
     const { data: storedMember, error: storedMemberError } = await adminClient
       .from("members")

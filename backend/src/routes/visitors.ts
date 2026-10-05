@@ -2,6 +2,7 @@ import { Router, type Response } from "express";
 
 import { requireAuth } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
+import { toMemberSummary } from "../members/member-projection.js";
 import {
   VisitorServiceError,
   type ListVisitorsOptions,
@@ -254,7 +255,12 @@ export function createVisitorsRouter(
       }
       await handleRequest(
         response,
-        () => visitorService.convert(request.actor!, visitorId, lifeGroupId),
+        () => visitorService.convert(request.actor!, visitorId, lifeGroupId).then(
+          (result) => ({
+            ...result,
+            member: toMemberSummary(result.member),
+          }),
+        ),
         201,
       );
     },
