@@ -21,6 +21,31 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
+let pageLockCount = 0
+let lockedRoot: HTMLElement | null = null
+let previousRootInert = false
+let previousBodyOverflow = ''
+
+function lockBackground() {
+  if (pageLockCount === 0) {
+    lockedRoot = document.getElementById('root')
+    previousRootInert = lockedRoot?.inert ?? false
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    if (lockedRoot) lockedRoot.inert = true
+  }
+  pageLockCount += 1
+}
+
+function unlockBackground() {
+  pageLockCount = Math.max(0, pageLockCount - 1)
+  if (pageLockCount > 0) return
+
+  document.body.style.overflow = previousBodyOverflow
+  if (lockedRoot) lockedRoot.inert = previousRootInert
+  lockedRoot = null
+}
+
 interface ModalProps {
   children: ReactNode
   className?: string
@@ -61,11 +86,7 @@ export function Modal({
         ? document.activeElement
         : null
     )
-    const root = document.getElementById('root')
-    const previousOverflow = document.body.style.overflow
-
-    document.body.style.overflow = 'hidden'
-    if (root) root.inert = true
+    lockBackground()
 
     const focusTimer = window.setTimeout(() => {
       const preferredFocus = dialogRef.current?.querySelector<HTMLElement>(
@@ -78,6 +99,11 @@ export function Modal({
     }, 0)
 
     function handleKeyDown(event: globalThis.KeyboardEvent) {
+      const openDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-horizon-modal]'),
+      )
+      if (openDialogs.at(-1) !== dialogRef.current) return
+
       if (event.key === 'Escape' && !preventCloseRef.current) {
         event.preventDefault()
         onCloseRef.current()
@@ -113,8 +139,7 @@ export function Modal({
     return () => {
       window.clearTimeout(focusTimer)
       document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = previousOverflow
-      if (root) root.inert = false
+      unlockBackground()
       previouslyFocused?.focus()
       window.setTimeout(() => {
         if (
@@ -140,6 +165,7 @@ export function Modal({
     >
       <div
         ref={dialogRef}
+        data-horizon-modal
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
