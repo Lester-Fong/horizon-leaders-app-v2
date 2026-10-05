@@ -162,7 +162,6 @@ export function MinistriesPage() {
   }
 
   function closeDetails() {
-    if (isDetailLoading) return
     setDetailId(null)
     setDetailMinistry(null)
     setDetailMembers([])
@@ -512,7 +511,6 @@ export function MinistriesPage() {
         className="max-w-2xl"
         isOpen={Boolean(detailId)}
         onClose={closeDetails}
-        preventClose={isDetailLoading}
         title={detailMinistry?.name ?? 'Ministry details'}
         description="Ministry information and the assigned Members this account is authorized to see."
       >

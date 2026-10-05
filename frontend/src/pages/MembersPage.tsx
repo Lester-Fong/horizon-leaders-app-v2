@@ -208,7 +208,6 @@ export function MembersPage() {
   }
 
   function closeDetails() {
-    if (isDetailLoading) return
     setDetailMemberId(null)
     setDetailMember(null)
     setDetailError(null)
@@ -530,7 +529,6 @@ export function MembersPage() {
         className="max-w-lg"
         isOpen={Boolean(detailMemberId)}
         onClose={closeDetails}
-        preventClose={isDetailLoading}
         title={
           detailMember
             ? `${detailMember.firstName} ${detailMember.lastName}`

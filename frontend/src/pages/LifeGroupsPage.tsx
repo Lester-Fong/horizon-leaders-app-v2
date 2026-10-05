@@ -415,8 +415,7 @@ export function LifeGroupsPage() {
       <Modal
         className="max-w-2xl"
         isOpen={Boolean(rosterGroup)}
-        onClose={() => !isRosterLoading && setRosterGroup(null)}
-        preventClose={isRosterLoading}
+        onClose={() => setRosterGroup(null)}
         title={rosterGroup ? `${rosterGroup.name} roster` : 'Life Group roster'}
         description="Current active Members and active affiliated Visitors. Visitor affiliation does not imply church membership."
       >

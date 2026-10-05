@@ -443,7 +443,6 @@ export function GatheringsPage() {
         className="max-w-2xl"
         isOpen={Boolean(detailId)}
         onClose={() => setDetailId(null)}
-        preventClose={isDetailLoading}
         title={detail ? gatheringName(detail) : 'Gathering details'}
         description="Life Group meeting record and attendance summary."
       >

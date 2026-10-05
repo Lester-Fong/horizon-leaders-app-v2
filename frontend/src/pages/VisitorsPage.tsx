@@ -153,7 +153,6 @@ export function VisitorsPage() {
   }
 
   function closeDetails() {
-    if (isDetailLoading) return
     setDetailVisitorId(null)
     setDetailVisitor(null)
     setDetailError(null)
@@ -377,7 +376,6 @@ export function VisitorsPage() {
         className="max-w-lg"
         isOpen={Boolean(detailVisitorId)}
         onClose={closeDetails}
-        preventClose={isDetailLoading}
         title={detailVisitor ? `${detailVisitor.firstName} ${detailVisitor.lastName}` : 'Visitor details'}
         description="Current Visitor identity, contact information, and lifecycle status."
       >
