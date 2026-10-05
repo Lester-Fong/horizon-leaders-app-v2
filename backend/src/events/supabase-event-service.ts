@@ -12,7 +12,11 @@ import {
   type SundayVisitorRegistration,
 } from "./types.js";
 
-interface Config { serviceRoleKey: string; supabaseUrl: string }
+interface Config {
+  fetchImpl?: typeof globalThis.fetch;
+  serviceRoleKey: string;
+  supabaseUrl: string;
+}
 type EventRow = Omit<Tables<"events">, "image_path">;
 type MemberRow = Pick<Tables<"members">, "created_at" | "email" | "first_name" | "id" | "is_active" | "last_name" | "life_group_id" | "phone">;
 
@@ -39,9 +43,10 @@ function isEligibleOn(member: MemberRow, eventDate: string) {
   return member.is_active && manilaDate(member.created_at) <= eventDate;
 }
 
-export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Config): EventService {
+export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabaseUrl }: Config): EventService {
   const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
   async function leaderGroupId(actor: HorizonActor) {
@@ -110,6 +115,33 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
     return new Map(data.map((row) => [row.id, row.name]));
   }
 
+  function mapAttendanceMember(
+    event: EventRow,
+    member: MemberRow,
+    lifeGroupId: string,
+    lifeGroupName: string,
+    isPresent: boolean,
+  ): SundayAttendanceMember {
+    const attendanceStatus = isPresent
+      ? "present"
+      : event.status === "open"
+        ? "not_checked_in"
+        : event.counts_for_absence
+          ? "absent"
+          : "not_counted";
+    return {
+      attendanceStatus,
+      email: member.email,
+      firstName: member.first_name,
+      id: member.id,
+      isActive: member.is_active,
+      isPresent,
+      lastName: member.last_name,
+      lifeGroup: { id: lifeGroupId, name: lifeGroupName },
+      phone: member.phone,
+    };
+  }
+
   async function attendanceRows(actor: HorizonActor, event: EventRow) {
     const groupId = await leaderGroupId(actor);
     const { data: presence, error: presenceError } = await supabase.from("sunday_service_presence").select("member_id").eq("event_id", event.id);
@@ -138,13 +170,13 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
     const names = await groupNames(scopedGroupIds);
     return members.map<SundayAttendanceMember>((member) => {
       const lifeGroupId = snapshotGroups.get(member.id) ?? member.life_group_id;
-      const isPresent = present.has(member.id);
-      const attendanceStatus = isPresent ? "present" : event.status === "open" ? "not_checked_in" : event.counts_for_absence ? "absent" : "not_counted";
-      return {
-        attendanceStatus, email: member.email, firstName: member.first_name, id: member.id,
-        isActive: member.is_active, isPresent, lastName: member.last_name,
-        lifeGroup: { id: lifeGroupId, name: names.get(lifeGroupId) ?? "Unknown Life Group" }, phone: member.phone,
-      };
+      return mapAttendanceMember(
+        event,
+        member,
+        lifeGroupId,
+        names.get(lifeGroupId) ?? "Unknown Life Group",
+        present.has(member.id),
+      );
     }).sort((a, b) => `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`));
   }
 
@@ -157,29 +189,30 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
       if (!isEligibleOn(data, event.event_date) || (groupId && data.life_group_id !== groupId)) {
         throw new EventServiceError(404, "MEMBER_NOT_ELIGIBLE", "Member is not eligible for this Sunday Service.");
       }
+      return { lifeGroupId: data.life_group_id, member: data };
     } else {
       if (actor.role !== "admin") throw forbidden("Closed Service attendance is read-only for Leaders.");
-      const { data: snapshot, error: snapshotError } = await supabase.from("sunday_service_eligibility").select("member_id").eq("event_id", event.id).eq("member_id", memberId).maybeSingle();
+      const { data: snapshot, error: snapshotError } = await supabase.from("sunday_service_eligibility").select("member_id, life_group_id_at_close").eq("event_id", event.id).eq("member_id", memberId).maybeSingle();
       if (snapshotError) throw unavailable();
       if (!snapshot) throw new EventServiceError(422, "MEMBER_NOT_ELIGIBLE", "Only Members in the close-time eligibility snapshot can be corrected.");
+      return { lifeGroupId: snapshot.life_group_id_at_close, member: data };
     }
-    return data;
   }
 
   async function recordPresence(actor: HorizonActor, event: EventRow, memberId: string) {
-    await eligibleMember(actor, event, memberId);
+    const eligible = await eligibleMember(actor, event, memberId);
     if (event.status === "closed") {
       const { data, error } = await supabase.rpc("correct_sunday_service_presence", { p_event_id: event.id, p_member_id: memberId, p_present: true });
       if (error) throw unavailable();
       if (data === "member_not_eligible") throw new EventServiceError(422, "MEMBER_NOT_ELIGIBLE", "Only Members in the close-time eligibility snapshot can be corrected.");
       if (data !== "recorded") throw unavailable();
-      return { memberId, result: "recorded" as const };
+      return { ...eligible, result: "recorded" as const };
     }
     const insert: TablesInsert<"sunday_service_presence"> = { event_id: event.id, member_id: memberId };
     const { error } = await supabase.from("sunday_service_presence").insert(insert);
-    if (error?.code === "23505") return { memberId, result: "already_present" as const };
+    if (error?.code === "23505") return { ...eligible, result: "already_present" as const };
     if (error) throw unavailable();
-    return { memberId, result: "recorded" as const };
+    return { ...eligible, result: "recorded" as const };
   }
 
   async function assertVisitorMutation(actor: HorizonActor, event: EventRow) {
@@ -272,16 +305,27 @@ export function createSupabaseEventService({ serviceRoleKey, supabaseUrl }: Conf
       return hydrateOne(await eventRow(eventId));
     },
     async getAttendance(actor, eventId) { return { members: await attendanceRows(actor, await eventRow(eventId)) }; },
-    async addAttendance(actor, eventId, memberId) { return recordPresence(actor, await eventRow(eventId), memberId); },
+    async addAttendance(actor, eventId, memberId) {
+      const result = await recordPresence(actor, await eventRow(eventId), memberId);
+      return { memberId: result.member.id, result: result.result };
+    },
     async addAttendanceByQr(actor, eventId, qrToken) {
       const event = await eventRow(eventId);
       const { data, error } = await supabase.from("members").select("id").eq("qr_token", qrToken).maybeSingle();
       if (error) throw unavailable();
       if (!data) throw new EventServiceError(404, "MEMBER_NOT_FOUND", "No eligible Member was found for that QR token.");
       const result = await recordPresence(actor, event, data.id);
-      const member = (await attendanceRows(actor, event)).find((entry) => entry.id === data.id);
-      if (!member) throw new EventServiceError(404, "MEMBER_NOT_ELIGIBLE", "No eligible Member was found for that QR token.");
-      return { member, result: result.result };
+      const names = await groupNames([result.lifeGroupId]);
+      return {
+        member: mapAttendanceMember(
+          event,
+          result.member,
+          result.lifeGroupId,
+          names.get(result.lifeGroupId) ?? "Unknown Life Group",
+          true,
+        ),
+        result: result.result,
+      };
     },
     async removeAttendance(actor, eventId, memberId) {
       const event = await eventRow(eventId);

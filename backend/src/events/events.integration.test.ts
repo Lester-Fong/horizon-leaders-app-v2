@@ -39,10 +39,21 @@ describeLocal("Sunday Service API with local Supabase", () => {
     const { error: updateError } = await client.from("profiles").update({ role }).eq("id", data.user.id); if (updateError) throw updateError; return data.user.id;
   }
   async function group(name: string, leaderId: string) { const { data, error } = await client.from("life_groups").insert({ leader_profile_id: leaderId, name }).select("id").single(); if (error) throw error; groupIds.push(data.id); return data.id; }
-  async function member(firstName: string, groupId: string, email?: string) { const qrToken = randomBytes(32).toString("base64url"); const { data, error } = await client.from("members").insert({ created_at: "2026-08-01T00:00:00+08:00", email: email ?? null, first_name: firstName, last_name: "Service Member", life_group_id: groupId, qr_token: qrToken }).select("id").single(); if (error) throw error; memberIds.push(data.id); return { id: data.id, qrToken }; }
+  async function member(firstName: string, groupId: string, email?: string) { const qrToken = randomBytes(32).toString("base64url"); const { data, error } = await client.from("members").insert({ created_at: "1999-01-01T00:00:00+08:00", email: email ?? null, first_name: firstName, last_name: "Service Member", life_group_id: groupId, qr_token: qrToken }).select("id").single(); if (error) throw error; memberIds.push(data.id); return { id: data.id, qrToken }; }
   async function visitor(firstName: string, createdAt?: string) { const { data, error } = await client.from("visitors").insert({ created_at: createdAt, first_name: firstName, last_name: "Service Visitor" }).select("id").single(); if (error) throw error; visitorIds.push(data.id); return data.id; }
 
   it("enforces lifecycle, scoped attendance, QR, snapshots, and Sunday Visitor rules", async () => {
+    const serviceRequests: string[] = [];
+    const measuredFetch: typeof globalThis.fetch = async (input, init) => {
+      serviceRequests.push(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      );
+      return globalThis.fetch(input, init);
+    };
     const adminId = await profile("Service Admin", "admin"); const leaderAId = await profile("Service Leader A", "leader"); const leaderBId = await profile("Service Leader B", "leader");
     const groupA = await group("Service Group A", leaderAId); const groupB = await group("Service Group B", leaderBId);
     const memberA = await member("Ana", groupA); const memberB = await member("Ben", groupB, `member-${randomUUID()}@example.test`);
@@ -52,12 +63,12 @@ describeLocal("Sunday Service API with local Supabase", () => {
       leaderB: { id: leaderBId, isActive: true, name: "Service Leader B", role: "leader" },
     };
     const authService: AuthService = { authenticate: async (token) => ({ actor: actors[token]!, ok: true }) };
-    const app = createApp({ authService, eventService: createSupabaseEventService({ serviceRoleKey: localKey, supabaseUrl: localUrl }) });
+    const app = createApp({ authService, eventService: createSupabaseEventService({ fetchImpl: measuredFetch, serviceRoleKey: localKey, supabaseUrl: localUrl }) });
     const api = (actor: string, method: "delete" | "get" | "patch" | "post", path: string) => request(app)[method](path).set("Authorization", `Bearer ${actor}`);
 
-    const leaderCreate = await api("leaderA", "post", "/api/events").send({ countsForAbsence: true, description: null, eventDate: "2026-08-23", location: null, title: "Forbidden" });
+    const leaderCreate = await api("leaderA", "post", "/api/events").send({ countsForAbsence: true, description: null, eventDate: "2000-01-02", location: null, title: "Forbidden" });
     expect(leaderCreate.status).toBe(403);
-    const created = await api("admin", "post", "/api/events").send({ countsForAbsence: true, description: "Weekly worship", eventDate: "2026-08-23", location: "Main Hall", title: "Sunday Service" });
+    const created = await api("admin", "post", "/api/events").send({ countsForAbsence: true, description: "Weekly worship", eventDate: "2000-01-02", location: "Main Hall", title: "Sunday Service" });
     expect(created.status).toBe(201); const eventId = created.body.data.id as string; eventIds.push(eventId);
     expect(created.body.data).toMatchObject({ countsForAbsence: true, status: "open", title: "Sunday Service" });
     expect((await api("leaderA", "get", "/api/events")).body.data.events.some((event: { id: string }) => event.id === eventId)).toBe(true);
@@ -82,15 +93,19 @@ describeLocal("Sunday Service API with local Supabase", () => {
       .eq("member_id", memberA.id);
     if (concurrentPresence.error) throw concurrentPresence.error;
     expect(concurrentPresence.count).toBe(1);
+    serviceRequests.length = 0;
     const duplicateQr = await api("leaderA", "post", `${attendancePath}/qr`).send({ qrToken: memberA.qrToken });
     expect(duplicateQr.status).toBe(201); expect(duplicateQr.body.data.result).toBe("already_present");
+    expect(serviceRequests).toHaveLength(6);
+    expect(serviceRequests.some((url) => url.includes("sunday_service_presence?select=member_id"))).toBe(false);
+    expect(serviceRequests.some((url) => url.includes("members?select=") && url.includes("is_active=eq.true"))).toBe(false);
     const otherQr = await api("leaderA", "post", `${attendancePath}/qr`).send({ qrToken: memberB.qrToken });
     expect(otherQr.status).toBe(404); expect(otherQr.body.error.code).toBe("MEMBER_NOT_ELIGIBLE");
     expect((await api("admin", "post", attendancePath).send({ memberId: memberB.id })).status).toBe(201);
     const leaderRoster = await api("leaderA", "get", attendancePath); expect(leaderRoster.body.data.members.map((entry: { id: string }) => entry.id)).toEqual([memberA.id]);
     const adminRoster = await api("admin", "get", attendancePath); expect(adminRoster.body.data.members).toHaveLength(2);
 
-    const existingVisitor = await visitor("Vera"); const lateVisitor = await visitor("Late", "2026-08-24T00:00:00+08:00");
+    const existingVisitor = await visitor("Vera", "1999-01-01T00:00:00+08:00"); const lateVisitor = await visitor("Late", "2000-01-03T00:00:00+08:00");
     expect((await api("leaderA", "post", `/api/events/${eventId}/visitors`).send({ visitorId: existingVisitor })).status).toBe(201);
     const duplicateVisitor = await api("leaderA", "post", `/api/events/${eventId}/visitors`).send({ visitorId: existingVisitor }); expect(duplicateVisitor.body.data.result).toBe("already_registered");
     const newVisitor = await api("leaderA", "post", `/api/events/${eventId}/visitors/new`).send({ email: null, firstName: "New", lastName: "Guest", phone: `0917${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}` });
@@ -106,11 +121,11 @@ describeLocal("Sunday Service API with local Supabase", () => {
     const memberConflict = await api("leaderA", "post", `/api/events/${eventId}/visitors/new`).send({ email: (await client.from("members").select("email").eq("id", memberB.id).single()).data!.email, firstName: "Duplicate", lastName: "Contact", phone: null });
     expect(memberConflict.status).toBe(409); expect(memberConflict.body.error.code).toBe("MEMBER_CONTACT_CONFLICT"); expect(memberConflict.body.error.details).not.toHaveProperty("memberId");
 
-    const dateLocked = await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2026-08-30" }); expect(dateLocked.status).toBe(422); expect(dateLocked.body.error.code).toBe("EVENT_ACTIVITY_LOCKS_DATE");
+    const dateLocked = await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2000-01-09" }); expect(dateLocked.status).toBe(422); expect(dateLocked.body.error.code).toBe("EVENT_ACTIVITY_LOCKS_DATE");
     const concurrentClose = await Promise.all([api("admin", "post", `/api/events/${eventId}/close`), api("admin", "post", `/api/events/${eventId}/close`)]);
     expect(concurrentClose.map(({ status }) => status).sort()).toEqual([200, 409]);
     const closed = concurrentClose.find(({ status }) => status === 200)!; expect(closed.body.data.status).toBe("closed"); expect(closed.body.data.eligibilityCount).toBe(2);
-    expect((await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2026-08-30" })).status).toBe(422);
+    expect((await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2000-01-09" })).status).toBe(422);
     const corrected = await api("admin", "patch", `/api/events/${eventId}`).send({ title: "Corrected Service" }); expect(corrected.status).toBe(200); expect(corrected.body.data.title).toBe("Corrected Service");
 
     await client.from("members").update({ is_active: false, life_group_id: groupB }).eq("id", memberA.id);
@@ -125,7 +140,7 @@ describeLocal("Sunday Service API with local Supabase", () => {
     await client.from("visitors").update({ converted_member_id: memberB.id, status: "converted" }).eq("id", existingVisitor);
     const historical = await api("leaderA", "get", `/api/events/${eventId}/visitors`); expect(historical.status).toBe(200); expect(historical.body.data.registrations.find((entry: { visitor: { id: string; status: string } }) => entry.visitor.id === existingVisitor).visitor.status).toBe("converted");
 
-    const excluded = await api("admin", "post", "/api/events").send({ countsForAbsence: false, description: null, eventDate: "2026-08-25", location: null, title: "Excluded Service" }); expect(excluded.status).toBe(201); const excludedId = excluded.body.data.id as string; eventIds.push(excludedId);
+    const excluded = await api("admin", "post", "/api/events").send({ countsForAbsence: false, description: null, eventDate: "2000-01-04", location: null, title: "Excluded Service" }); expect(excluded.status).toBe(201); const excludedId = excluded.body.data.id as string; eventIds.push(excludedId);
     expect((await api("admin", "post", `/api/events/${excludedId}/close`)).status).toBe(200);
     const excludedRoster = await api("admin", "get", `/api/events/${excludedId}/attendance`); expect(excludedRoster.body.data.members.every((entry: { attendanceStatus: string }) => entry.isPresent || entry.attendanceStatus === "not_counted")).toBe(true);
   });

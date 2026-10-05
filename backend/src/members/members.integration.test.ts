@@ -99,6 +99,17 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
   }
 
   it("enforces Member mutations, normalization, QR permanence, and role scope", async () => {
+    const serviceRequests: string[] = [];
+    const measuredFetch: typeof globalThis.fetch = async (input, init) => {
+      serviceRequests.push(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+      );
+      return globalThis.fetch(input, init);
+    };
     const adminId = await createProfile("Integration Admin", "admin");
     const leaderAId = await createProfile("Leader A", "leader");
     const leaderBId = await createProfile("Leader B", "leader");
@@ -135,6 +146,7 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
       authenticate: async (token) => ({ actor: actors[token]!, ok: true }),
     };
     const memberService = createSupabaseMemberService({
+      fetchImpl: measuredFetch,
       serviceRoleKey: integrationServiceRoleKey,
       supabaseUrl: integrationSupabaseUrl,
     });
@@ -198,11 +210,14 @@ describeWithLocalSupabase("Member API with local Supabase", () => {
     );
     expect(ownArchivedResult.status).toBe(200);
 
+    serviceRequests.length = 0;
     const adminDefaultList = await asActor(
       "admin-token",
       "get",
       "/api/members",
     );
+    expect(serviceRequests).toHaveLength(2);
+    expect(serviceRequests.filter((url) => url.includes("/rest/v1/life_groups"))).toHaveLength(1);
     const adminArchivedList = await asActor(
       "admin-token",
       "get",

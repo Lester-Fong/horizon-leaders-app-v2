@@ -21,6 +21,7 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
   const visitorIds: string[] = [];
   const groupIds: string[] = [];
   const memberIds: string[] = [];
+  const eventIds: string[] = [];
 
   afterEach(async () => {
     if (sessionIds.length) {
@@ -34,6 +35,14 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
     if (visitorIds.length) {
       await db.from("follow_ups").delete().in("visitor_id", visitorIds);
       await db.from("visitors").delete().in("id", visitorIds);
+    }
+    if (eventIds.length) {
+      await db.from("sunday_service_presence").delete().in("event_id", eventIds);
+      await db.from("sunday_service_eligibility").delete().in("event_id", eventIds);
+      await db.from("events").delete().in("id", eventIds);
+    }
+    if (groupIds.length) {
+      await db.from("members").delete().in("life_group_id", groupIds);
     }
     if (memberIds.length) {
       await db.from("follow_ups").delete().in("member_id", memberIds);
@@ -50,6 +59,7 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
     visitorIds.splice(0);
     groupIds.splice(0);
     memberIds.splice(0);
+    eventIds.splice(0);
   });
 
   it("counts active participants and upcoming sessions beyond the first 100 programmes", async () => {
@@ -142,5 +152,101 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
     expect(data.metrics.myLifeGroupMembers).toBe(1);
     expect(data.metrics.myLifeGroupVisitors).toBe(1);
     expect(data.memberSnapshot.gender.reduce((total, row) => total + row.count, 0)).toBe(1);
+  });
+
+  it("keeps Member and Sunday aggregates correct beyond the PostgREST row limit", async () => {
+    const createdUser = await db.auth.admin.createUser({
+      email: `dashboard-volume-${Date.now()}@example.test`,
+      email_confirm: true,
+      password: "Dashboard-Aa1!",
+    });
+    if (createdUser.error || !createdUser.data.user) throw createdUser.error ?? new Error("User missing");
+    const actorId = createdUser.data.user.id;
+    users.push(actorId);
+    const actor: HorizonActor = { id: actorId, isActive: true, name: "Dashboard Volume Admin", role: "admin" };
+
+    const group = await db.from("life_groups").insert({
+      name: `Dashboard Volume ${Date.now()}`,
+      leader_profile_id: actorId,
+    }).select("id").single();
+    if (group.error) throw group.error;
+    groupIds.push(group.data.id);
+
+    const service = createSupabaseDashboardService({ serviceRoleKey: key!, supabaseUrl: url! });
+    const before = await service.get(actor, { period: "year" });
+    const fixtureMembers = Array.from({ length: 1001 }, (_, index) => ({
+      id: randomUUID(),
+      first_name: "Volume",
+      last_name: `Member ${index}`,
+      life_group_id: group.data.id,
+      qr_token: randomUUID(),
+      gender: index % 2 === 0 ? "female" as const : "male" as const,
+      birth_date: "2000-01-01",
+    }));
+    for (let index = 0; index < fixtureMembers.length; index += 400) {
+      const insertedMembers = await db.from("members").insert(fixtureMembers.slice(index, index + 400));
+      if (insertedMembers.error) throw insertedMembers.error;
+    }
+
+    const existingServices = await db.from("events")
+      .select("event_date")
+      .eq("type", "service")
+      .eq("counts_for_absence", true);
+    if (existingServices.error) throw existingServices.error;
+    const usedServiceDates = new Set(existingServices.data.map((row) => row.event_date));
+    const today = new Date(`${churchDate()}T00:00:00Z`);
+    today.setUTCDate(today.getUTCDate() - today.getUTCDay());
+    let serviceDate: string | undefined;
+    for (let week = 0; week < 53; week += 1) {
+      const candidate = today.toISOString().slice(0, 10);
+      if (!usedServiceDates.has(candidate)) {
+        serviceDate = candidate;
+        break;
+      }
+      today.setUTCDate(today.getUTCDate() - 7);
+    }
+    if (!serviceDate) throw new Error("No isolated Sunday Service date is available in the current year");
+
+    const event = await db.from("events").insert({
+      type: "service",
+      status: "closed",
+      title: "Dashboard Volume Service",
+      event_date: serviceDate,
+      counts_for_absence: true,
+      created_by_profile_id: actorId,
+    }).select("id").single();
+    if (event.error) throw event.error;
+    eventIds.push(event.data.id);
+
+    const eligibility = fixtureMembers.map((member) => ({
+      event_id: event.data.id,
+      member_id: member.id,
+      life_group_id_at_close: group.data.id,
+    }));
+    const presence = fixtureMembers.slice(0, 751).map((member) => ({
+      event_id: event.data.id,
+      member_id: member.id,
+    }));
+    for (let index = 0; index < eligibility.length; index += 400) {
+      const insertedEligibility = await db.from("sunday_service_eligibility").insert(eligibility.slice(index, index + 400));
+      if (insertedEligibility.error) throw insertedEligibility.error;
+    }
+    for (let index = 0; index < presence.length; index += 400) {
+      const insertedPresence = await db.from("sunday_service_presence").insert(presence.slice(index, index + 400));
+      if (insertedPresence.error) throw insertedPresence.error;
+    }
+
+    const after = await service.get(actor, { period: "year" });
+    expect(after.metrics.activeMembers).toBe(before.metrics.activeMembers + 1001);
+    expect(after.memberSnapshot.gender.reduce((total, row) => total + row.count, 0)).toBe(
+      before.memberSnapshot.gender.reduce((total, row) => total + row.count, 0) + 1001,
+    );
+    expect(after.sundayAttendance.points.find((point) => point.eventId === event.data.id)).toEqual({
+      date: serviceDate,
+      eligibleCount: 1001,
+      eventId: event.data.id,
+      presentCount: 751,
+      rate: 75,
+    });
   });
 });

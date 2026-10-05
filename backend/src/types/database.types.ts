@@ -1011,6 +1011,22 @@ export type Database = {
           outcome: string
         }[]
       }
+      dashboard_member_demographics: {
+        Args: { p_as_of_date: string; p_life_group_id: string | null }
+        Returns: {
+          bucket_count: number
+          bucket_key: string
+          dimension: string
+        }[]
+      }
+      dashboard_sunday_attendance: {
+        Args: { p_event_ids: string[]; p_life_group_id: string | null }
+        Returns: {
+          eligible_count: number
+          event_id: string
+          present_count: number
+        }[]
+      }
       enroll_opencell_visitor: {
         Args: {
           p_enrolled_by_profile_id: string

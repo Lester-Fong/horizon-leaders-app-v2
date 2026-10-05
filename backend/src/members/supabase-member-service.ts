@@ -21,6 +21,7 @@ import {
 import { CHURCH_TIME_ZONE } from "../config/constants.js";
 
 interface SupabaseMemberServiceConfig {
+  fetchImpl?: typeof globalThis.fetch;
   generateQrToken?: () => string;
   serviceRoleKey: string;
   supabaseUrl: string;
@@ -131,6 +132,7 @@ function matchesAge(birthDate: string | null, filter: ListMembersOptions["age"])
 }
 
 export function createSupabaseMemberService({
+  fetchImpl,
   generateQrToken = generateMemberQrToken,
   serviceRoleKey,
   supabaseUrl,
@@ -141,6 +143,7 @@ export function createSupabaseMemberService({
       detectSessionInUrl: false,
       persistSession: false,
     },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
   async function getLifeGroup(lifeGroupId: string) {
@@ -255,8 +258,26 @@ export function createSupabaseMemberService({
     return data;
   }
 
+  async function hydrateMembers(rows: MemberRow[]) {
+    if (rows.length === 0) return [];
+    const lifeGroupIds = [...new Set(rows.map((member) => member.life_group_id))];
+    const { data, error } = await supabase
+      .from("life_groups")
+      .select(LIFE_GROUP_COLUMNS)
+      .in("id", lifeGroupIds);
+    if (error || data.length !== lifeGroupIds.length) throw serviceUnavailable();
+    const lifeGroups = new Map(data.map((lifeGroup) => [lifeGroup.id, lifeGroup]));
+    return rows.map((member) => {
+      const lifeGroup = lifeGroups.get(member.life_group_id);
+      if (!lifeGroup) throw serviceUnavailable();
+      return mapMember(member, lifeGroup);
+    });
+  }
+
   async function hydrateMember(member: MemberRow) {
-    return mapMember(member, await getLifeGroup(member.life_group_id));
+    const [hydrated] = await hydrateMembers([member]);
+    if (!hydrated) throw serviceUnavailable();
+    return hydrated;
   }
 
   async function assertLeaderCanEdit(actor: HorizonActor, member: MemberRow) {
@@ -283,7 +304,7 @@ export function createSupabaseMemberService({
   return {
     async list(actor, options) {
       const rows = await listRows(actor, options);
-      const members = await Promise.all(rows.map(hydrateMember));
+      const members = await hydrateMembers(rows);
       return members.filter(
         (member) =>
           matchesSearch(member, options.search) &&

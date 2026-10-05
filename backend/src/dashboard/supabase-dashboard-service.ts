@@ -12,7 +12,6 @@ import {
 } from "./types.js";
 
 interface Config { serviceRoleKey: string; supabaseUrl: string }
-type MemberRow = Pick<Tables<"members">, "birth_date" | "gender" | "is_active" | "life_group_id">;
 type EventRow = Pick<Tables<"events">, "counts_for_absence" | "event_date" | "id" | "status" | "title" | "type">;
 
 const REASONS: FollowUpReason[] = [
@@ -51,23 +50,6 @@ function localMonthBounds() {
   return { end: nextMonth.toISOString(), start: new Date(`${start}T00:00:00+08:00`).toISOString() };
 }
 
-function ageForDate(birthDate: string | null, today: string) {
-  if (!birthDate) return null;
-  let age = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4));
-  if (today.slice(5) < birthDate.slice(5)) age -= 1;
-  return age;
-}
-
-function ageKey(age: number | null) {
-  if (age === null) return "not_set";
-  if (age < 18) return "under_18";
-  if (age <= 24) return "18_24";
-  if (age <= 34) return "25_34";
-  if (age <= 44) return "35_44";
-  if (age <= 54) return "45_54";
-  return "55_plus";
-}
-
 const AGE_LABELS: Record<string, string> = {
   under_18: "Under 18", "18_24": "18–24", "25_34": "25–34", "35_44": "35–44",
   "45_54": "45–54", "55_plus": "55+", not_set: "Not set",
@@ -100,42 +82,48 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       const groupId = actor.role === "leader" ? ownGroup : undefined;
       const chartGroupId = actor.role === "leader" ? ownGroup : options.lifeGroupId;
       const today = localToday();
-      const memberQuery = supabase.from("members").select("birth_date, gender, is_active, life_group_id").eq("is_active", true);
-      if (groupId) memberQuery.eq("life_group_id", groupId);
+      const month = localMonthBounds();
       const visitorQuery = supabase.from("visitors").select("id", { count: "exact", head: true }).eq("status", "active");
       if (groupId) visitorQuery.eq("life_group_id", groupId);
-      const [membersResult, visitorsResult, followUpsResult, activeProgrammeCountResult, activeEnrollmentCountResult] = await Promise.all([
-        memberQuery,
+      const newVisitorsQuery = actor.role === "admin"
+        ? supabase.from("visitors").select("id", { count: "exact", head: true }).gte("created_at", month.start).lt("created_at", month.end)
+        : Promise.resolve({ count: 0, error: null });
+      const [demographicsResult, visitorsResult, activeProgrammeCountResult, activeEnrollmentCountResult, newVisitorsResult, followUpResults] = await Promise.all([
+        supabase.rpc("dashboard_member_demographics", {
+          p_as_of_date: today,
+          p_life_group_id: groupId ?? null,
+        }),
         visitorQuery,
-        supabase.from("follow_ups").select("reason").eq("status", "active"),
         supabase.from("opencell_programmes").select("id", { count: "exact", head: true }).eq("status", "active"),
         // One active enrollment per Visitor is enforced by the OpenCell schema,
         // so an exact row count is the authoritative current-participant count.
         supabase.from("opencell_enrollments").select("visitor_id, opencell_programmes!inner(status)", { count: "exact", head: true }).eq("opencell_programmes.status", "active"),
+        newVisitorsQuery,
+        Promise.all(REASONS.map((reason) =>
+          supabase.from("follow_ups").select("id", { count: "exact", head: true }).eq("status", "active").eq("reason", reason),
+        )),
       ]);
-      if (membersResult.error || visitorsResult.error || followUpsResult.error || activeProgrammeCountResult.error || activeEnrollmentCountResult.error) unavailable();
-      const members = (membersResult.data ?? []) as MemberRow[];
+      if (
+        demographicsResult.error || visitorsResult.error ||
+        activeProgrammeCountResult.error || activeEnrollmentCountResult.error ||
+        newVisitorsResult.error || followUpResults.some((result) => result.error)
+      ) unavailable();
       const activeVisitorCount = visitorsResult.count ?? 0;
       const activeProgrammeCount = activeProgrammeCountResult.count ?? 0;
       const activeParticipantCount = activeEnrollmentCountResult.count ?? 0;
 
-      const month = localMonthBounds();
-      const newVisitorsQuery = actor.role === "admin"
-        ? supabase.from("visitors").select("id", { count: "exact", head: true }).gte("created_at", month.start).lt("created_at", month.end)
-        : null;
-      const newVisitorsResult = newVisitorsQuery ? await newVisitorsQuery : { count: 0, error: null };
-      if (newVisitorsResult.error) unavailable();
-
       const followUpCounts = new Map<string, number>();
-      for (const row of followUpsResult.data ?? []) followUpCounts.set(row.reason, (followUpCounts.get(row.reason) ?? 0) + 1);
+      REASONS.forEach((reason, index) => {
+        followUpCounts.set(reason, followUpResults[index]?.count ?? 0);
+      });
       const memberGender = new Map<string, number>();
       const memberAge = new Map<string, number>();
-      for (const member of members) {
-        const gender = member.gender ?? "not_set";
-        memberGender.set(gender, (memberGender.get(gender) ?? 0) + 1);
-        const age = ageKey(ageForDate(member.birth_date, today));
-        memberAge.set(age, (memberAge.get(age) ?? 0) + 1);
+      for (const row of demographicsResult.data ?? []) {
+        const target = row.dimension === "gender" ? memberGender : memberAge;
+        target.set(row.bucket_key, Number(row.bucket_count));
       }
+      const activeMemberCount = [...memberGender.values()].reduce((sum, count) => sum + count, 0);
+      const activeFollowUpCount = [...followUpCounts.values()].reduce((sum, count) => sum + count, 0);
 
       const periodLimit = options.period === "year" ? 53 : Number(options.period);
       const eventQuery = supabase.from("events").select("id, event_date, title, type, status, counts_for_absence")
@@ -146,32 +134,21 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       if (eventsResult.error) unavailable();
       const events = (eventsResult.data ?? []) as EventRow[];
       const eventIds = events.map((event) => event.id);
-      const eligibilityQuery = eventIds.length
-        ? supabase.from("sunday_service_eligibility").select("event_id, member_id, life_group_id_at_close").in("event_id", eventIds)
-        : null;
-      const presenceQuery = eventIds.length
-        ? supabase.from("sunday_service_presence").select("event_id, member_id").in("event_id", eventIds)
-        : null;
-      const [eligibilityResult, presenceResult] = await Promise.all([
-        eligibilityQuery ?? Promise.resolve({ data: [], error: null }),
-        presenceQuery ?? Promise.resolve({ data: [], error: null }),
-      ]);
-      if (eligibilityResult.error || presenceResult.error) unavailable();
-      const eligible = new Map<string, Set<string>>();
-      for (const row of eligibilityResult.data ?? []) {
-        if (chartGroupId && row.life_group_id_at_close !== chartGroupId) continue;
-        const set = eligible.get(row.event_id) ?? new Set<string>();
-        set.add(row.member_id); eligible.set(row.event_id, set);
-      }
-      const present = new Map<string, Set<string>>();
-      for (const row of presenceResult.data ?? []) {
-        const set = present.get(row.event_id) ?? new Set<string>();
-        set.add(row.member_id); present.set(row.event_id, set);
-      }
+      const attendanceResult = eventIds.length
+        ? await supabase.rpc("dashboard_sunday_attendance", {
+          p_event_ids: eventIds,
+            p_life_group_id: chartGroupId ?? null,
+          })
+        : { data: [], error: null };
+      if (attendanceResult.error) unavailable();
+      const attendance = new Map(
+        (attendanceResult.data ?? []).map((row) => [row.event_id, row]),
+      );
       const points = [...events].reverse().map((event) => {
-        const eligibleSet = eligible.get(event.id) ?? new Set<string>();
-        const presentSet = new Set([...present.get(event.id) ?? []].filter((id) => eligibleSet.has(id)));
-        return { date: event.event_date, eligibleCount: eligibleSet.size, eventId: event.id, presentCount: presentSet.size, rate: eligibleSet.size ? Math.round((presentSet.size / eligibleSet.size) * 100) : null };
+        const counts = attendance.get(event.id);
+        const eligibleCount = Number(counts?.eligible_count ?? 0);
+        const presentCount = Number(counts?.present_count ?? 0);
+        return { date: event.event_date, eligibleCount, eventId: event.id, presentCount, rate: eligibleCount ? Math.round((presentCount / eligibleCount) * 100) : null };
       });
       const validRates = points.filter((point) => point.rate !== null).map((point) => point.rate as number);
 
@@ -194,11 +171,11 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
 
       return {
-        memberSnapshot: { age: breakdown(["under_18", "18_24", "25_34", "35_44", "45_54", "55_plus", "not_set"], memberAge, AGE_LABELS, members.length), gender: breakdown(["male", "female", "not_set"], memberGender, GENDER_LABELS, members.length) },
+        memberSnapshot: { age: breakdown(["under_18", "18_24", "25_34", "35_44", "45_54", "55_plus", "not_set"], memberAge, AGE_LABELS, activeMemberCount), gender: breakdown(["male", "female", "not_set"], memberGender, GENDER_LABELS, activeMemberCount) },
         metrics: actor.role === "admin"
-          ? { activeFollowUps: followUpsResult.data?.length ?? 0, activeMembers: members.length, activeOpenCellProgrammes: activeProgrammeCount, activeVisitors: activeVisitorCount, newVisitorsThisMonth: newVisitorsResult.count ?? 0 }
-          : { activeFollowUps: followUpsResult.data?.length ?? 0, activeOpenCellProgrammes: activeProgrammeCount, myLifeGroupMembers: members.length, myLifeGroupVisitors: activeVisitorCount },
-        needsAttention: { byReason: breakdown(REASONS, followUpCounts, FOLLOW_UP_REASON_LABELS, followUpsResult.data?.length ?? 0), total: followUpsResult.data?.length ?? 0 },
+          ? { activeFollowUps: activeFollowUpCount, activeMembers: activeMemberCount, activeOpenCellProgrammes: activeProgrammeCount, activeVisitors: activeVisitorCount, newVisitorsThisMonth: newVisitorsResult.count ?? 0 }
+          : { activeFollowUps: activeFollowUpCount, activeOpenCellProgrammes: activeProgrammeCount, myLifeGroupMembers: activeMemberCount, myLifeGroupVisitors: activeVisitorCount },
+        needsAttention: { byReason: breakdown(REASONS, followUpCounts, FOLLOW_UP_REASON_LABELS, activeFollowUpCount), total: activeFollowUpCount },
         openCell: { activeProgrammes: activeProgrammeCount, currentParticipants: activeParticipantCount },
         recentUpcoming: { recent, upcoming },
         sundayAttendance: { averageRate: validRates.length ? Math.round(validRates.reduce((sum, rate) => sum + rate, 0) / validRates.length) : null, points },
