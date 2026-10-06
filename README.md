@@ -282,4 +282,4 @@ All implemented dialogs use the shared accessible modal foundation. Read-only di
 
 Supabase Auth provides identity; Express loads the trusted Profile and enforces all domain authorization. Browser roles do not have direct table or Storage CRUD policies. Public signup is disabled locally. Never expose service-role credentials or treat hidden frontend controls as authorization.
 
-No hosted project or deployment target is configured by this runbook.
+DEP-001 selects Cloudflare Pages Free for the static frontend, a Render Free Web Service for initial low-traffic API deployment/testing, and the existing hosted Supabase project for PostgreSQL, Auth, private Storage, and Cron. Nothing is deployed or remotely configured yet. See `docs/DEPLOYMENT.md` for the approved topology, exact later-phase settings, current free-tier constraints, and upgrade triggers.
