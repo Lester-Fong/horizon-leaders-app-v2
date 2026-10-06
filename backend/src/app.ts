@@ -64,6 +64,13 @@ export interface AppDependencies {
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
 const JSON_BODY_LIMIT = "100kb";
 
+function isAllowedCorsOrigin(
+  requestOrigin: string | undefined,
+  frontendOrigin: string,
+): boolean {
+  return requestOrigin === undefined || requestOrigin === frontendOrigin;
+}
+
 const applyApiSecurityHeaders: RequestHandler = (_request, response, next) => {
   response.set({
     "Cache-Control": "private, no-store",
@@ -295,7 +302,13 @@ export function createApp({
   const app = express();
 
   app.disable("x-powered-by");
-  app.use(cors({ origin: frontendOrigin }));
+  app.use(
+    cors({
+      origin: (requestOrigin, callback) => {
+        callback(null, isAllowedCorsOrigin(requestOrigin, frontendOrigin));
+      },
+    }),
+  );
   app.use("/api", applyApiSecurityHeaders);
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use("/api", healthRouter);

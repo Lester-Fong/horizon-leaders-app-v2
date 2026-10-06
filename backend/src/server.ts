@@ -81,6 +81,6 @@ const app = createApp({
   uploadService,
 });
 
-app.listen(config.port, () => {
-  console.log(`Horizon API listening on port ${config.port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`Horizon API listening on ${config.host}:${config.port}`);
 });

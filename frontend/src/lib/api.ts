@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+import { readApiUrl } from '../../config/public-environment'
 export type AppRole = 'admin' | 'leader'
 
 export interface HorizonActor {
@@ -819,11 +820,7 @@ function readApiError(payload: unknown) {
   return { code, details, message }
 }
 
-const apiUrl = import.meta.env.VITE_API_URL?.trim()
-
-if (!apiUrl) {
-  throw new Error('VITE_API_URL is required')
-}
+const apiUrl = readApiUrl({ VITE_API_URL: import.meta.env.VITE_API_URL })
 
 async function requestApi<T>(
   accessToken: string,

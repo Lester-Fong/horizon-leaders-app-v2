@@ -64,4 +64,26 @@ describe("GET /api/health", () => {
     expect(response.type).toBe("application/json");
     expect(response.body.error.code).toBe("API_ROUTE_NOT_FOUND");
   });
+
+  it("allows only the exact configured browser origin", async () => {
+    const corsApp = createApp({
+      authService: unusedAuthService,
+      frontendOrigin: "https://horizon.pages.dev",
+    });
+    const allowed = await request(corsApp)
+      .get("/api/health")
+      .set("Origin", "https://horizon.pages.dev");
+    const wrongScheme = await request(corsApp)
+      .get("/api/health")
+      .set("Origin", "http://horizon.pages.dev");
+    const unrelated = await request(corsApp)
+      .get("/api/health")
+      .set("Origin", "https://unrelated.example");
+
+    expect(allowed.headers["access-control-allow-origin"]).toBe(
+      "https://horizon.pages.dev",
+    );
+    expect(wrongScheme.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(unrelated.headers["access-control-allow-origin"]).toBeUndefined();
+  });
 });
