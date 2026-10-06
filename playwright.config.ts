@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-const frontendUrl = process.env.E2E_FRONTEND_URL ?? 'http://localhost:5173'
+const frontendUrl = process.env.E2E_FRONTEND_URL ?? 'http://127.0.0.1:5173'
 const backendUrl = process.env.E2E_BACKEND_URL ?? 'http://127.0.0.1:3000'
 
 export default defineConfig({
@@ -28,7 +28,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'npm --prefix frontend run dev -- --host localhost',
+      command: 'npm --prefix frontend run dev -- --host 127.0.0.1',
       url: `${frontendUrl}/login`,
       reuseExistingServer: true,
       timeout: 120_000,

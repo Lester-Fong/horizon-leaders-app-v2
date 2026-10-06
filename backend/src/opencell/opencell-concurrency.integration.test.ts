@@ -136,7 +136,7 @@ describeLocal("OpenCell concurrency with local Supabase", () => {
 
     const visitorState = await client
       .from("visitors")
-      .select("converted_member_id, status")
+      .select("converted_at, converted_member_id, status")
       .eq("id", visitor.id)
       .single();
     if (visitorState.error) throw visitorState.error;
@@ -150,7 +150,7 @@ describeLocal("OpenCell concurrency with local Supabase", () => {
     if (enrollment.status === 201) {
       expect(conversion.status).toBe(409);
       expect(conversion.body.error.code).toBe("ACTIVE_OPENCELL_ENROLLMENT");
-      expect(visitorState.data).toEqual({ converted_member_id: null, status: "active" });
+      expect(visitorState.data).toEqual({ converted_at: null, converted_member_id: null, status: "active" });
       expect(enrollmentCount.count).toBe(1);
       return;
     }
@@ -160,6 +160,7 @@ describeLocal("OpenCell concurrency with local Supabase", () => {
     expect(conversion.status).toBe(201);
     expect(visitorState.data.status).toBe("converted");
     expect(visitorState.data.converted_member_id).toEqual(expect.any(String));
+    expect(visitorState.data.converted_at).toEqual(expect.any(String));
     memberIds.push(visitorState.data.converted_member_id!);
     expect(enrollmentCount.count).toBe(0);
   });

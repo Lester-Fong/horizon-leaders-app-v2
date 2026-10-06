@@ -47,11 +47,12 @@ export async function verifyDemo(context: DemoContext) {
   }
   assert.ok(members.data!.every((member) => /^[A-Za-z0-9_-]{43}$/.test(member.qr_token) && member.qr_token !== member.id));
 
-  const visitors = await db.from("visitors").select("id,status,converted_member_id,life_group_id,created_at");
+  const visitors = await db.from("visitors").select("id,status,converted_member_id,converted_at,life_group_id,created_at");
   checkResult(visitors, "Verifying Visitors");
   assert.equal(visitors.data!.filter((visitor) => visitor.status === "active").length, 16);
   const converted = visitors.data!.filter((visitor) => visitor.status === "converted");
   assert.equal(converted.length, 2);
+  assert.ok(converted.every((visitor) => visitor.converted_at !== null));
   assert.ok(converted.every((visitor) => members.data!.some((member) => member.id === visitor.converted_member_id && member.life_group_id === visitor.life_group_id)));
   assert.ok(visitors.data!.some((visitor) => churchDate(new Date(visitor.created_at)).slice(0, 7) === context.today.slice(0, 7)));
   const visitorAttendance = await db.from("life_group_gathering_visitor_attendance").select("visitor_id");

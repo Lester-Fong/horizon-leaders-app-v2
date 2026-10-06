@@ -34,7 +34,7 @@ type MemberConflictRow = Pick<
 >;
 
 const VISITOR_COLUMNS =
-  "id, first_name, last_name, phone, email, normalized_phone, normalized_email, life_group_id, status, converted_member_id, created_at, updated_at";
+  "id, first_name, last_name, phone, email, normalized_phone, normalized_email, life_group_id, status, converted_member_id, converted_at, created_at, updated_at";
 const LIFE_GROUP_COLUMNS = "id, name, is_active, leader_profile_id";
 
 function serviceUnavailable() {
@@ -75,6 +75,7 @@ function mapVisitor(
   lifeGroup?: { id: string; is_active: boolean; name: string },
 ): Visitor {
   return {
+    convertedAt: visitor.converted_at,
     convertedMemberId: visitor.converted_member_id,
     createdAt: visitor.created_at,
     email: visitor.email,

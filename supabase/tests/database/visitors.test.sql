@@ -2,10 +2,23 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(50);
+select plan(59);
 
 select has_table('public', 'visitors', 'visitors table exists');
 select has_pk('public', 'visitors', 'visitors has a primary key');
+select has_column(
+  'public',
+  'visitors',
+  'converted_at',
+  'visitors stores an authoritative conversion timestamp'
+);
+select col_type_is(
+  'public',
+  'visitors',
+  'converted_at',
+  'timestamp with time zone',
+  'converted_at uses timestamptz'
+);
 select is(
   (
     select jsonb_agg(enumlabel order by enumsortorder)
@@ -124,6 +137,23 @@ select is(
   null::uuid,
   'new active Visitors have no converted Member'
 );
+select is(
+  (select converted_at from public.visitors where id = '95555555-5555-4555-8555-555555555555'),
+  null::timestamp with time zone,
+  'new active Visitors have no conversion timestamp'
+);
+do $$
+begin
+  begin
+    update public.visitors
+    set converted_at = transaction_timestamp()
+    where id = '95555555-5555-4555-8555-555555555555';
+    raise exception 'active Visitor accepted converted_at';
+  exception when check_violation then null;
+  end;
+end;
+$$;
+select pass('active Visitors cannot receive a conversion timestamp');
 select is(
   (select normalized_email from public.visitors where id = '95555555-5555-4555-8555-555555555555'),
   'ana.visitor@example.test',
@@ -344,6 +374,11 @@ select is(
   'duplicate conflict leaves converted_member_id null'
 );
 select is(
+  (select converted_at from public.visitors where id = '98888888-8888-4888-8888-888888888888'),
+  null::timestamp with time zone,
+  'duplicate conflict leaves converted_at null'
+);
+select is(
   (select count(*) from public.members where qr_token = 'duplicate-conversion-token'),
   0::bigint,
   'duplicate conflict creates no Member'
@@ -400,11 +435,11 @@ $$;
 select pass('failed Member creation rolls back the conversion function');
 select ok(
   (
-    select status = 'active' and converted_member_id is null
+    select status = 'active' and converted_member_id is null and converted_at is null
     from public.visitors
     where id = '90000000-0000-4000-8000-000000000001'
   ),
-  'rollback leaves Visitor active and unlinked'
+  'rollback leaves Visitor active, unlinked, and without a conversion timestamp'
 );
 
 insert into public.visitors (id, first_name, last_name, phone, email)
@@ -467,6 +502,18 @@ select is(
   'converted',
   'successful conversion marks the Visitor converted'
 );
+select ok(
+  (
+    select converted_at is not null
+    from public.visitors
+    where id = '90000000-0000-4000-8000-000000000002'
+  ),
+  'successful conversion receives a database-authored conversion timestamp'
+);
+create temporary table converted_at_snapshot as
+select converted_at
+from public.visitors
+where id = '90000000-0000-4000-8000-000000000002';
 select is(
   (
     select visitors.converted_member_id
@@ -502,6 +549,67 @@ select is(
   ),
   1::bigint,
   'one Visitor conversion creates exactly one Member'
+);
+select is(
+  (
+    select converted_at
+    from public.visitors
+    where id = '90000000-0000-4000-8000-000000000002'
+  ),
+  (select converted_at from converted_at_snapshot),
+  'repeated conversion does not replace the original timestamp'
+);
+do $$
+begin
+  begin
+    update public.visitors
+    set converted_at = converted_at + interval '1 second'
+    where id = '90000000-0000-4000-8000-000000000002';
+    raise exception 'converted_at mutation unexpectedly succeeded';
+  exception when check_violation then null;
+  end;
+end;
+$$;
+select pass('converted_at is immutable after conversion');
+
+insert into public.members (
+  id,
+  first_name,
+  last_name,
+  life_group_id,
+  qr_token
+)
+values (
+  '90000000-0000-4000-8000-000000000003',
+  'Historical',
+  'Member',
+  '93333333-3333-4333-8333-333333333333',
+  'historical-conversion-member-token'
+);
+insert into public.visitors (
+  id,
+  first_name,
+  last_name,
+  status,
+  converted_member_id,
+  converted_at
+)
+values (
+  '90000000-0000-4000-8000-000000000004',
+  'Historical',
+  'Visitor',
+  'converted',
+  '90000000-0000-4000-8000-000000000003',
+  null
+);
+select is(
+  (
+    select converted_at
+    from public.visitors
+    where id = '90000000-0000-4000-8000-000000000004'
+  ),
+  null::timestamp with time zone,
+  'historical converted Visitors may retain an unknown conversion timestamp'
 );
 
 do $$

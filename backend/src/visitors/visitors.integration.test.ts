@@ -149,7 +149,8 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     const converted = await asActor("leader-a-token", "post", `/api/visitors/${firstId}/convert`).send({});
     expect(converted.status).toBe(201);
     trackVisitor(converted);
-    expect(converted.body.data.visitor).toMatchObject({ convertedMemberId: converted.body.data.member.id, id: firstId, lifeGroup: { id: groupAId }, status: "converted" });
+    expect(converted.body.data.visitor).toMatchObject({ convertedAt: expect.any(String), convertedMemberId: converted.body.data.member.id, id: firstId, lifeGroup: { id: groupAId }, status: "converted" });
+    expect(Number.isNaN(Date.parse(converted.body.data.visitor.convertedAt))).toBe(false);
     expect(converted.body.data.member).toMatchObject({ address: null, birthDate: null, email: "VISITOR.ONE@Example.Test", firstName: "Maria", gender: null, isActive: true, lastName: "One", lifeGroup: { id: groupAId }, phone: "0917 111 2233" });
     expect(converted.body.data.member).not.toHaveProperty("qrToken");
     const convertedMemberDetail = await asActor(
@@ -169,6 +170,7 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     expect(adminConvertedList.body.data).toEqual([expect.objectContaining({ id: firstId, status: "converted" })]);
     expect(adminConvertedDetail.status).toBe(200);
     expect(adminConvertedDetail.body.data.lifeGroup.id).toBe(groupAId);
+    expect(adminConvertedDetail.body.data.convertedAt).toBe(converted.body.data.visitor.convertedAt);
     expect((await asActor("admin-token", "patch", `/api/visitors/${firstId}/life-group`).send({ lifeGroupId: null })).status).toBe(409);
     expect((await asActor("admin-token", "patch", `/api/visitors/${firstId}`).send({ firstName: "No" })).status).toBe(409);
     expect((await asActor("admin-token", "post", `/api/visitors/${firstId}/convert`).send({ lifeGroupId: groupAId })).status).toBe(409);
@@ -185,8 +187,8 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     expect(conflictResult.status).toBe(409);
     expect(conflictResult.body.error.code).toBe("DUPLICATE_MEMBER_EMAIL");
     expect(conflictResult.body.error.message).toBe("A Member with this email address already exists. Conversion cannot continue.");
-    const { data: unchangedVisitor } = await adminClient.from("visitors").select("status, converted_member_id").eq("id", conflictVisitorId).single();
-    expect(unchangedVisitor).toEqual({ converted_member_id: null, status: "active" });
+    const { data: unchangedVisitor } = await adminClient.from("visitors").select("status, converted_member_id, converted_at").eq("id", conflictVisitorId).single();
+    expect(unchangedVisitor).toEqual({ converted_at: null, converted_member_id: null, status: "active" });
 
     const visiblePhone = `0918${Math.floor(1000000 + Math.random() * 8999999)}`;
     const { data: visibleMember, error: visibleMemberError } = await adminClient.from("members").insert({
@@ -216,5 +218,12 @@ describeWithLocalSupabase("Visitor API with local Supabase", () => {
     const { count, error: countError } = await adminClient.from("members").select("id", { count: "exact", head: true }).eq("first_name", "Concurrent").eq("last_name", "Convert");
     if (countError) throw countError;
     expect(count).toBe(1);
+    const { data: concurrentVisitorState, error: concurrentStateError } = await adminClient
+      .from("visitors")
+      .select("converted_at")
+      .eq("id", concurrentId)
+      .single();
+    if (concurrentStateError) throw concurrentStateError;
+    expect(concurrentVisitorState.converted_at).toEqual(expect.any(String));
   });
 });

@@ -1,188 +1,285 @@
 # Horizon Church V2
 
-Horizon Church V2 is a new church leadership application for managing people, ministries, Life Groups, gatherings, events, attendance, visitors, follow-up, Harvest, and OpenCell. This repository starts fresh and does not reuse the architecture of the previous Laravel/Vue application.
+Horizon Church V2 is an authenticated church operations application built with React, Express, and Supabase. The implemented MVP covers Admin/Leader authorization, Life Groups, Members, Ministries, Gatherings, Visitors and conversion, Sunday Services, Harvest, Follow Up, OpenCell, automation, Dashboard reporting, permanent Member QR attendance, and private domain images.
 
-Phase 0 established runnable application skeletons and the V2 product source of truth. Phase 1A added a reproducible local Supabase workflow and `public.profiles`. Phase 2 added controlled authentication and reusable Admin/Leader authorization. Phase 3 added the responsive application shell. Phase 4 adds the first domain slice: `public.life_groups`, authenticated reads, Admin management, Leader assignment safeguards, and a responsive Admin/Leader screen. Members, Ministries, Gatherings, hosted Supabase, and deployment remain intentionally unconfigured.
-
-## Stack
-
-- Frontend: React, TypeScript, Vite, and Tailwind CSS
-- Backend: Node.js, TypeScript, and Express 5
-- Platform: Supabase PostgreSQL and Auth locally; Storage and Cron remain planned for later phases
-
-## Repository structure
-
-```text
-frontend/   React application
-backend/    Express API
-supabase/   Local configuration, migrations, and database tests
-docs/       Product, decision, data-model, and delivery documentation
-```
+This README is the tracked local-development and operations runbook. Product decisions remain in the intentionally local/ignored `docs/` directory when that directory is present in the working copy.
 
 ## Prerequisites
 
-- Node.js `20.19.x`, `22.13+`, or `24+`
-- npm
-- Docker Desktop or another Docker-compatible runtime for local Supabase
+- Node.js `20.19.x`, `22.13+`, or `24+` (`24.15.0` is the verified development version)
+- npm (`11.12.1` is verified)
+- Docker Desktop or another Docker-compatible runtime
+- Root dependencies, which provide the repository-pinned Supabase CLI `2.114.0`
+- Microsoft Edge for the default Playwright project; Firefox/WebKit binaries for the QA-005 matrix
 
-Use a currently supported Node.js LTS release for development and deployment.
+Do not use production credentials for local development or tests.
 
-## Supabase local development
+## Clean local setup
 
-The repository pins Supabase CLI `2.114.0` as a root development dependency. Install it and run all local commands from the repository root:
+Run commands from the repository root unless a section says otherwise.
 
 ```bash
 npm install
+npm --prefix backend install
+npm --prefix frontend install
 npm run supabase:start
 npm run supabase:reset
-npm run supabase:test
-npm run supabase:types
+npm run supabase -- status -o env
+```
+
+`supabase:reset` is destructive to this repository's disposable local database. It replays every migration and does not seed demo records.
+
+Copy the environment templates:
+
+```text
+backend/.env.example  -> backend/.env
+frontend/.env.example -> frontend/.env.local
+```
+
+Use only values printed by the local `supabase status -o env` command. Then keep two terminals running:
+
+```bash
+npm --prefix backend run dev
+```
+
+```bash
+npm --prefix frontend run dev -- --host 127.0.0.1
+```
+
+Open `http://127.0.0.1:5173`. The backend health endpoint is `http://127.0.0.1:3000/api/health`.
+
+Stop local Supabase when finished:
+
+```bash
 npm run supabase:stop
 ```
 
-`supabase:reset` destroys and recreates only the disposable local database from version-controlled migrations. `supabase:types` regenerates `backend/src/types/database.types.ts` from that applied local schema.
+## Environment variables
 
-The local project is not linked to a hosted Supabase project. Public signup is disabled, and credentials printed by the local CLI are development-only and must not be committed or reused as production secrets. See [supabase/README.md](supabase/README.md) for the workflow and security baseline.
+### Frontend-safe variables
 
-## Local demo church
+These are required by Vite and are compiled into browser code:
 
-With Docker/local Supabase running, root and backend dependencies installed,
-and `backend/.env` configured with the local `SUPABASE_URL` and backend-only
-`SUPABASE_SERVICE_ROLE_KEY`, run from the repository root:
+| Variable | Purpose |
+| --- | --- |
+| `VITE_API_URL` | Express origin, normally `http://127.0.0.1:3000` |
+| `VITE_SUPABASE_URL` | Local Supabase API URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Browser-safe local publishable key |
+| `VITE_SUPABASE_ANON_KEY` | Legacy alternative when no publishable key is available |
+
+Configure exactly one of the two public-key variables. Never place a service-role key, secret key, database password, or JWT secret in any `VITE_` variable.
+
+### Backend-only variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SUPABASE_URL` | Yes | Supabase API URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Privileged server-only domain access |
+| `NODE_ENV` | No | Defaults to `development` |
+| `PORT` | No | Defaults to `3000` |
+| `FRONTEND_ORIGIN` | No | CORS origin; defaults to `http://127.0.0.1:5173` |
+
+The service-role value belongs only in `backend/.env` or a secure deployment secret store. It must never appear in frontend files, API responses, logs, screenshots, or committed configuration.
+
+### Test-only variables
+
+- Integration tests use `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+- Auth integration additionally uses `SUPABASE_PUBLISHABLE_KEY` or legacy `SUPABASE_ANON_KEY`.
+- Playwright optionally accepts `E2E_FRONTEND_URL` and `E2E_BACKEND_URL`; defaults are the normal local origins.
+
+If `E2E_FRONTEND_URL` is overridden, `FRONTEND_ORIGIN` must use the same exact scheme, host, and port so Express CORS remains intentional.
+
+There are no V2 AES variables. Upload bucket/limits, signed-URL lifetime, church timezone, Sunday threshold, and OpenCell threshold are named code/database constants rather than environment inputs.
+
+## Database and migrations
+
+Migrations live under `supabase/migrations/` and are applied in filename order. Previously released migrations are immutable: make schema or function changes with a new forward migration rather than editing history.
+
+Normal local verification:
+
+```bash
+npm run supabase:reset
+npm run supabase:test
+npm run supabase:types
+git diff --check
+```
+
+For a non-destructive forward application to the running local database:
+
+```bash
+npm run supabase -- migration up
+```
+
+After schema/function changes, regenerate `backend/src/types/database.types.ts` with `supabase:types` and review its diff. Important recent migrations include:
+
+- `20260904100000_sunday_automation.sql`
+- `20260916100000_create_private_domain_uploads.sql`
+- `20261005100000_add_dashboard_performance_aggregates.sql`
+
+Never use `--linked`, `db push`, or remote credentials unless a later deployment task explicitly authorizes the target.
+
+## Local demo data
+
+With local Supabase running and `backend/.env` configured:
 
 ```bash
 npm run demo:seed
 ```
 
-This requires an empty local database and creates 1 Admin, 7 Leaders, 7 Life
-Groups, 46 Members (44 active), 18 Visitors (2 converted), 5 Ministries,
-28 Gatherings, 14 Sunday Services, 2 Harvest Events, and 3 OpenCell Programmes.
-Follow Ups are generated through the real workflows; the command verifies the
-dataset and prints the final counts.
+The seed command is local-only, refuses unknown/non-loopback Supabase URLs, and refuses a non-empty or partially seeded database. It creates known development-only Admin and Leader accounts and interconnected records through real domain workflows.
 
-| Local demo login | Password |
+| Demo account | Development-only password |
 | --- | --- |
 | `admin@example.test` | `Admin123!Aa` |
 | `leader1@example.test` through `leader7@example.test` | `Leader123!Aa` |
 
-For a repeatable fresh dataset:
+To explicitly destroy and rebuild only disposable local demo data:
 
 ```bash
 npm run demo:reset
 ```
 
-**Reset destroys all data in this project's disposable local database.** It
-runs the existing pinned `supabase:reset` command before seeding. `demo:seed`
-never deletes existing data; it refuses non-empty or partially seeded databases
-and directs you to the explicit reset command. Do not run concurrent seed/reset
-commands.
+Do not point either command at arbitrary developer, shared, hosted, or production data. Do not run seed/reset concurrently.
 
-Both commands reject remote/unknown Supabase URLs before connecting or resetting.
-Only HTTP loopback endpoints on the configured local API port `54321` are
-accepted. Demo passwords/records are development fixtures, never production
-defaults. Privileged keys come only from backend environment configuration.
+## Sunday automation operations
 
-The modules under `backend/src/demo/` use the real conversion, Sunday closing
-and absence evaluation, Harvest interest, OpenCell finish, and Follow Up
-completion services. Relative dates use Asia/Manila. Base Member timestamps are
-backdated before recording historical attendance so close-time eligibility is
-authentic; snapshots, absence state, QR tokens, and generated Follow Ups are not
-fabricated. The demo includes archived history, varied demographics, late
-OpenCell enrollment, cancelled Sessions, and converted Visitor history.
+- Closing a counting Sunday Service evaluates absence synchronously.
+- Admin closed-attendance/counting corrections synchronize affected evaluations.
+- Supabase Cron runs `public.reconcile_sunday_services()` daily at `0 19 * * *` UTC, which is 03:00 in `Asia/Manila`.
+- Reconciliation processes oldest pending closed counting Services that lack a successful `sunday_service_evaluations` row.
+- One Service failure is recorded and does not prevent later pending Services from being attempted.
+- `automation_runs` records run status, counts, timestamps, and bounded error summaries.
+- `sunday_absence_threshold_occurrences` preserves immutable threshold crossings for idempotency.
 
-On January dates, the This Year chart naturally contains only qualifying Sundays
-already elapsed in that year; Last 4/8/12 retains the cross-year history.
-Targeted seeder tests: `npm --prefix backend test -- src/demo/demo.test.ts`.
+Inspect `automation_runs`, `sunday_service_evaluations`, and `sunday_absence_threshold_occurrences` with an authorized PostgreSQL client when diagnosing automation. Do not hand-edit attendance, occurrence, evaluation, or Follow Up rows to force an outcome. Correct the authoritative Service attendance/counting state through the application and allow synchronous evaluation or reconciliation to recover it.
 
-## Browser end-to-end tests
+## Private image operations
 
-QA-003 uses Playwright with the installed Microsoft Edge Chromium channel. With
-Docker running and the local frontend/backend environment files configured, run
-the deterministic seeded suite from the repository root:
+The private `horizon-uploads` bucket supports only Member photos, Life Group logos, and implemented Event images. Express authorizes the owning record and returns short-lived signed URLs (15 minutes). The browser never receives privileged Storage credentials.
 
-```bash
-npm run test:e2e:seeded
-```
+- Input is limited to 5 MB and validated as JPEG, PNG, or WebP content.
+- The server applies orientation, strips metadata, bounds dimensions to 1600x1600, and stores WebP.
+- Replacement uploads the new object and updates the database before deleting the old object.
+- Removal clears the database pointer before best-effort object deletion.
+- Archive/close operations retain images.
 
-This command intentionally resets only the guarded loopback Supabase project,
-seeds the local demo church, starts the frontend/backend test servers, and runs
-the critical Admin and Leader browser journeys. To rerun against the current
-already-seeded local database without another reset, use `npm run test:e2e`.
+Recovery behavior:
 
-QA-005 adds automated accessibility/responsive checks plus Edge, Firefox, and
-WebKit browser coverage:
+- Failed validation, processing, or upload leaves the old image authoritative.
+- A database update failure triggers best-effort cleanup of the newly uploaded orphan.
+- Failed obsolete-object cleanup leaves the new pointer authoritative; remove the confirmed orphan later with privileged tooling.
+- A missing referenced object degrades to the normal placeholder; repair/clear the domain pointer deliberately rather than making the bucket public.
+- An expired signed URL is normal—request the image again through Horizon.
 
-```bash
-npm run test:e2e:qa005
-```
+## Verification matrix
 
-Sunday QR camera access is requested only after `Start camera`. Production use
-requires HTTPS; localhost is suitable for development. The connected-scanner
-input and manual attendance remain available when camera access is denied or no
-camera exists.
+| Scope | Command |
+| --- | --- |
+| Backend unit/full local suite | `npm --prefix backend test` |
+| Backend integrations, serialized | `npm --prefix backend run test:integration` |
+| Windows-safe serialized/thread regression | `npm --prefix backend test -- --pool=threads --maxWorkers=1 --no-file-parallelism` |
+| All pgTAP database tests | `npm run supabase:test` |
+| One pgTAP file | `npm run supabase -- test db supabase/tests/database/<name>.test.sql` |
+| Frontend unit tests | `npm --prefix frontend test` |
+| Current seeded browser state | `npm run test:e2e` |
+| Destructive reset + seed + E2E | `npm run test:e2e:seeded` |
+| Accessibility/responsive/browser matrix | `npm run test:e2e:qa005` |
+| Backend lint/build | `npm --prefix backend run lint` / `npm --prefix backend run build` |
+| Frontend lint/build | `npm --prefix frontend run lint` / `npm --prefix frontend run build` |
+| Git whitespace | `git diff --check` |
 
-Manual phone/tablet camera check after starting the local app (or an HTTPS test
-deployment):
+Integration suites require local Supabase and the test variables above. `test:e2e:seeded` and `demo:reset` destroy disposable local data. On Windows, if Vitest worker IPC/fork startup is unstable, use the documented thread pool with one worker and disabled file parallelism rather than treating an IPC failure as a domain-test failure.
 
-1. Sign in, open an open Sunday Service, then open `QR check-in`.
-2. Choose `Camera`, press `Start camera`, and grant permission; confirm the rear
-   camera is selected where the device supports it.
-3. Scan a downloaded Member QR and confirm the Member success message and
-   attendance refresh without closing the scanner.
-4. Keep the same code in frame to confirm requests are not spammed, then scan it
-   again after a pause to confirm the normal `already present` response.
-5. Scan another authorized Member, then try an unknown or out-of-scope QR and
-   confirm safe feedback without identity disclosure.
-6. Press `Stop camera`, close the dialog, and navigate away; confirm the device
-   camera indicator turns off each time.
-7. Deny permission once and confirm `Scanner input` still accepts a connected
-   USB/Bluetooth scanner with Enter submission.
+## Troubleshooting and recovery
 
-## Frontend
+### Local Supabase is unavailable
 
-Copy `frontend/.env.example` to `frontend/.env.local` and use only the local browser-safe Supabase publishable (or legacy anon) key reported by `supabase status`. Never put a service-role or secret key in a `VITE_` variable.
+1. Confirm Docker is running.
+2. Run `npm run supabase -- status`.
+3. Run `npm run supabase:start`.
+4. Use `npm run supabase:reset` only when the local database is disposable and a full migration replay is appropriate.
 
-Authenticated Admins and Leaders share the responsive Horizon shell. Life Groups is implemented at `/life-groups`: Admins can create, edit, archive/reactivate, and reassign groups, while Leaders have a read-only active-group view. The other planned domain routes remain intentional placeholders. Users remains visible and accessible only to Admins in the frontend, while all sensitive authorization remains a backend responsibility.
+### A migration fails
 
-```bash
-cd frontend
-npm install
-npm run dev
-npm run lint
-npm run build
-```
+Read the first failing filename/error from `supabase:reset` or `migration up`, fix the newest forward migration when appropriate, and replay locally. Do not casually rewrite an already released migration; add a corrective forward migration.
 
-## Backend
+### Demo seed refuses to run
 
-Copy `backend/.env.example` to `backend/.env` and supply the local Supabase URL and backend-only service-role key reported by `supabase status`. Never commit the resulting `.env` file or copy its privileged values into frontend configuration.
+This is a safety feature: the database is non-empty, partially seeded, or not loopback-local. Use `demo:reset` only when destroying the local data is intended. Never weaken the locality/emptiness guards.
 
-```bash
-cd backend
-npm install
-npm run dev
-npm run lint
-npm test
-npm run build
-npm start
-```
+### Auth integration is skipped
 
-The API health check is available at `GET /api/health`. `GET /api/me` requires `Authorization: Bearer <access-token>` and returns only the trusted active Horizon actor loaded from `public.profiles`.
+Provide the local browser-safe key as `SUPABASE_PUBLISHABLE_KEY` or `SUPABASE_ANON_KEY` in the test environment. Do not hardcode it and do not substitute the service-role key.
 
-Life Group endpoints are authenticated. `GET /api/life-groups` and `GET /api/life-groups/:id` serve approved role-aware reads. Admin-only operations are `GET /api/life-groups/leaders`, `POST /api/life-groups`, `PATCH /api/life-groups/:id`, and `PATCH /api/life-groups/:id/status`. Normal product behavior has no Life Group DELETE endpoint.
+### Sunday automation has a pending/failed evaluation
 
-The integration tests create and delete disposable controlled local users and Life Groups through supported Supabase APIs. Authentication integration additionally requires `SUPABASE_PUBLISHABLE_KEY` (or `SUPABASE_ANON_KEY`); Life Group integration requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`:
+Inspect the run/evaluation tables and the underlying Service state. Pending Services are retried by reconciliation. Avoid direct edits to derived Follow Up or occurrence history unless the full transactional impact is understood.
 
-```bash
-npm run test:integration
-```
+### Camera scanning is unavailable
 
-Public signup remains disabled. There is no public registration route or committed default account.
+Camera access requires localhost or HTTPS, an available camera, and browser permission. Permission denial, unsupported/insecure context, or absent hardware should use Scanner Input or manual attendance. Closing the dialog or navigating away must stop the camera.
 
-## Source of truth
+### Git reports LF/CRLF conversion warnings
 
-- [Product specification](docs/PRODUCT_SPEC.md)
-- [Locked decisions](docs/DECISIONS.md)
-- [Data model](docs/DATA_MODEL.md)
-- [Development checklist](docs/DEVELOPMENT_CHECKLIST.md)
+These warnings are informational on Windows and are not the same as a `git diff --check` whitespace failure. Review the actual diff; do not normalize unrelated files opportunistically.
 
-Only the local Supabase foundation, `profiles` and `life_groups` migrations, authentication/RBAC foundation, application shell, and Life Group foundation are configured. Remote linking, Member/Ministry/Gathering schema, other domain tables, Storage, Cron, and deployment begin in later explicitly approved phases.
+## Known limitations
+
+### Manual verification remaining
+
+- Real phone/tablet camera behavior still needs a physical-device smoke test; automated tests cover lifecycle and failure boundaries but cannot claim hardware verification.
+
+### Intentional MVP exclusions
+
+- Other Event participation/attendance behavior
+- Public Harvest registration
+- Care Notes
+- DYH modeling
+- Member participation in OpenCell
+- Attendance time-in/time-out, late, or excused states
+
+### Deferred data work
+
+- Authoritative `visitors.converted_at` is populated for new conversions. Historical null dates remain unknown, and conversion-period analytics must never infer them from `updated_at`.
+
+### Deployment hardening
+
+- Ingress rate limiting for sensitive mutation endpoints
+- Centralized token revocation and operational logging
+- Hosted environment/secrets/CORS configuration and deployment procedures
+- A live dependency registry audit in an internet-enabled environment
+
+### Future scale work
+
+- Server pagination and large-list rendering before substantially larger datasets
+- Reducing full Sunday workspace refetch payloads if roster size materially grows
+- Optimizing very large historical Sunday/OpenCell evaluation workloads if measured deployment volume requires it
+
+These are exclusions, manual checks, or scale/hardening concerns—not known failures in the current local MVP.
+
+## Physical Sunday QR smoke test (pending)
+
+Do not mark this passed until it is performed on real hardware.
+
+1. Open Horizon over HTTPS on a real phone/tablet.
+2. Open an open Sunday Service and choose **QR Check-in → Camera**.
+3. Start the camera and confirm the rear camera is selected when supported.
+4. Scan a valid Member QR displayed on another device or printout.
+5. Confirm attendance succeeds.
+6. Keep/re-scan the same QR and confirm cooldown plus server `already_present` behavior.
+7. Scan a different authorized Member without reopening the scanner.
+8. As Leader, scan an unauthorized/out-of-scope Member QR and confirm safe rejection.
+9. Stop the camera and confirm the operating-system camera indicator turns off.
+10. Repeat while closing the modal and while navigating away; confirm the camera stops.
+11. Deny camera permission and confirm Scanner Input remains usable.
+12. Confirm manual attendance remains usable.
+
+## Modal behavior
+
+All implemented dialogs use the shared accessible modal foundation. Read-only dialogs may close while loading. Mutation dialogs lock incidental close routes only while a mutation is actively in flight. X, Cancel/Close, backdrop, and Escape are consistent; Escape affects only the top dialog. Focus is restored to the trigger, background scroll/inert state is reference-counted for nested dialogs, and modal content scrolls internally on constrained viewports.
+
+## Security baseline
+
+Supabase Auth provides identity; Express loads the trusted Profile and enforces all domain authorization. Browser roles do not have direct table or Storage CRUD policies. Public signup is disabled locally. Never expose service-role credentials or treat hidden frontend controls as authorization.
+
+No hosted project or deployment target is configured by this runbook.

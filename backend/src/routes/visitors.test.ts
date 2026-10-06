@@ -18,6 +18,7 @@ const actors: Record<"admin" | "leader", HorizonActor> = {
   leader: { id: "55555555-5555-4555-8555-555555555555", isActive: true, name: "Lina Leader", role: "leader" },
 };
 const visitor: Visitor = {
+  convertedAt: null,
   convertedMemberId: null,
   createdAt: "2026-08-19T04:00:00.000Z",
   email: "mara@example.test",
@@ -56,7 +57,7 @@ function createAuthService(): AuthService {
 
 function createVisitorService(): VisitorService {
   return {
-    convert: vi.fn(async () => ({ member, visitor: { ...visitor, convertedMemberId: memberId, status: "converted" } })),
+    convert: vi.fn(async () => ({ member, visitor: { ...visitor, convertedAt: "2026-08-19T04:05:00.000Z", convertedMemberId: memberId, status: "converted" } })),
     create: vi.fn(async () => visitor),
     getById: vi.fn(async () => visitor),
     list: vi.fn(async () => [visitor]),
@@ -151,10 +152,12 @@ describe("Visitor API", () => {
   it("converts through the actor-scoped service without accepting extra fields", async () => {
     const { app, visitorService } = createTestApp();
     const converted = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer leader-token").send({ lifeGroupId: groupId });
-    const controlled = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer admin-token").send({ lifeGroupId: groupId, qrToken: "chosen" });
+    const controlledTimestamp = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer admin-token").send({ lifeGroupId: groupId, convertedAt: "2000-01-01T00:00:00.000Z" });
+    const controlledQr = await request(app).post(`/api/visitors/${visitorId}/convert`).set("Authorization", "Bearer admin-token").send({ lifeGroupId: groupId, qrToken: "chosen" });
     expect(converted.status).toBe(201);
+    expect(converted.body.data.visitor.convertedAt).toBe("2026-08-19T04:05:00.000Z");
     expect(converted.body.data.member).not.toHaveProperty("qrToken");
-    expect(controlled.status).toBe(400);
+    expect([controlledTimestamp.status, controlledQr.status]).toEqual([400, 400]);
     expect(visitorService.convert).toHaveBeenCalledTimes(1);
     expect(visitorService.convert).toHaveBeenCalledWith(actors.leader, visitorId, groupId);
   });

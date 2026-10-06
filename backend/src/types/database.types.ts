@@ -863,6 +863,7 @@ export type Database = {
       }
       visitors: {
         Row: {
+          converted_at: string | null
           converted_member_id: string | null
           created_at: string
           email: string | null
@@ -877,6 +878,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          converted_at?: string | null
           converted_member_id?: string | null
           created_at?: string
           email?: string | null
@@ -891,6 +893,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          converted_at?: string | null
           converted_member_id?: string | null
           created_at?: string
           email?: string | null

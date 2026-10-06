@@ -1,71 +1,38 @@
-# Supabase local development
+# Supabase local operations
 
-Phase 1A establishes a migration-first local Supabase workflow and the first approved Horizon schema slice. It does not create or link a hosted Supabase project.
+The root `README.md` is the primary setup and recovery runbook. This directory contains the reproducible local platform definition:
 
-## CLI method
+- `config.toml` — local Supabase services and ports
+- `migrations/` — ordered schema, function, Storage, and Cron changes
+- `tests/database/` — transactional pgTAP coverage
 
-Supabase CLI `2.114.0` is pinned exactly in the root `package.json`. Install root dependencies with `npm install`, then use the root npm scripts. This resolves the repository-pinned CLI rather than an unknown global installation.
+The root package pins Supabase CLI `2.114.0`. Use the root scripts rather than an unrelated global CLI:
 
 ```bash
 npm run supabase -- --version
 npm run supabase:start
+npm run supabase -- status
 npm run supabase:reset
 npm run supabase:test
 npm run supabase:types
 npm run supabase:stop
 ```
 
-Equivalent one-off CLI commands may be run with `npx supabase <command>` after root dependencies are installed. See the official [Supabase CLI guide](https://supabase.com/docs/guides/local-development/cli/getting-started).
+Docker must be running. `supabase:reset` destroys only the disposable local database and replays the complete migration chain. SQL seeding is disabled; the guarded demo tooling is `npm run demo:seed` or the destructive local-only `npm run demo:reset`.
 
-## Version-controlled files
+## Migration policy
 
-- `config.toml` — local-only service configuration; it contains no production credentials
-- `migrations/20260814150026_create_profiles.sql` — the first approved schema migration
-- `tests/database/profiles.test.sql` — transactional pgTAP coverage for schema and security invariants
-- `.gitignore` — excludes Supabase CLI temporary/branch state and local environment keys
+Use migration-first development. Do not edit previously released migrations to add later behavior. Add a timestamped forward migration, verify both `migration up` and a clean local reset when appropriate, run pgTAP, regenerate database types, and inspect the diff.
 
-Database SQL seeding remains disabled. Opt-in local demo data is created by the
-modular backend seeder: run `npm run demo:seed` on an empty running local
-database, or `npm run demo:reset` to explicitly destroy local data, replay the
-pinned migrations, and seed again. See the root README's Local demo church
-section for credentials, safeguards, and scenarios. Demo records never belong
-in migrations.
+Never add `--linked`, run a remote push, or use hosted credentials without explicit deployment authorization.
 
-## Daily workflow
+## Security and services
 
-Docker must be running before starting Supabase.
+- Public signup and anonymous sign-in are disabled.
+- Domain tables/functions and the private `horizon-uploads` bucket expose no direct `anon`/`authenticated` CRUD policies.
+- Express uses the backend-only service role after authentication and domain authorization.
+- Storage is enabled locally for private Member/Life Group/Event images.
+- `pg_cron` schedules Sunday reconciliation at `0 19 * * *` UTC.
+- Realtime, Studio, local SMTP, Edge Runtime, and Analytics remain disabled in the local configuration because Horizon does not require them.
 
-1. Run `npm run supabase:start`.
-2. After changing migrations, run `npm run supabase:reset` to destroy and recreate the disposable local database from the full migration chain.
-3. Run `npm run supabase:test` to verify database behavior.
-4. Run `npm run supabase:types` to regenerate `backend/src/types/database.types.ts` from the applied local schema.
-5. Run `npm run supabase:stop` when local services are no longer needed.
-
-The normal `supabase db reset` command targets the local project. Never add `--linked` unless a later task explicitly creates and authorizes a disposable remote development environment.
-
-## Profiles slice
-
-`public.profiles` is the only Horizon application table in this phase. It has a one-to-one UUID relationship with the primary key of `auth.users` and contains only:
-
-- `id`
-- `name`
-- `role`
-- `is_active`
-- `created_at`
-- `updated_at`
-
-`public.app_role` permits exactly `admin` and `leader`.
-
-An Auth-user insert trigger creates the matching profile. It may copy user-controlled metadata only into the display name. It never trusts metadata for role or activation state, always defaults the role to `leader`, and therefore cannot create an `admin` through self-supplied signup metadata. Missing names fall back deterministically to the email local part and then `New user`.
-
-Public signup is disabled by top-level `auth.enable_signup = false` in `config.toml` because Horizon intends controlled staff accounts. The email provider remains enabled so those existing controlled users can sign in with a password; the global setting still rejects registration. Integration tests create random disposable users through the local admin API and remove them afterward. The opt-in demo seeder also uses this API and sets roles through the privileged Profile path. No production seeder or production default account exists. See the official [Supabase Auth configuration guidance](https://supabase.com/docs/guides/auth/general-configuration).
-
-## RLS baseline
-
-RLS is enabled on `public.profiles`. This phase creates no `anon` or `authenticated` policies and explicitly revokes their direct table privileges. The table grants the `service_role` server-side access for future Express use.
-
-Service-role or secret credentials must never appear in frontend code. Express verifies the caller's access token with Supabase Auth, then uses its backend-only service-role client to load `profiles` and enforce Horizon authorization. Any future direct browser data access requires an explicit policy migration and tests. See the official [Supabase RLS guide](https://supabase.com/docs/guides/database/postgres/row-level-security).
-
-## Deliberately deferred
-
-The local configuration disables nonessential services for this slice, including Storage, Realtime, Studio, local SMTP, Edge Runtime, and Analytics. No Storage buckets, Cron jobs, remote link, hosted credentials, CRUD, or other Horizon domain tables are included.
+Credentials printed by the local CLI are development-only. Never commit them or copy service-role/secret values into frontend variables.

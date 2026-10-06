@@ -1,5 +1,5 @@
 begin;
-select plan(6);
+select plan(7);
 
 insert into auth.users (id, email, raw_user_meta_data)
 values ('81111111-1111-4111-8111-111111111111', 'opencell-conversion@example.test', '{"name":"OpenCell Conversion"}'::jsonb);
@@ -25,6 +25,7 @@ select is(
 );
 select is((select status::text from public.visitors where id = '83333333-3333-4333-8333-333333333333'), 'active', 'blocked conversion preserves Visitor status');
 select is((select converted_member_id from public.visitors where id = '83333333-3333-4333-8333-333333333333'), null::uuid, 'blocked conversion does not link a Member');
+select is((select converted_at from public.visitors where id = '83333333-3333-4333-8333-333333333333'), null::timestamp with time zone, 'blocked conversion does not stamp converted_at');
 select is((select count(*) from public.members where first_name = 'Enrolled' and last_name = 'Visitor'), 0::bigint, 'blocked conversion creates no Member');
 select is((select count(*) from public.opencell_enrollments where visitor_id = '83333333-3333-4333-8333-333333333333'), 1::bigint, 'blocked conversion preserves enrollment history');
 select pass('OpenCell conversion blocker is enforced transactionally');

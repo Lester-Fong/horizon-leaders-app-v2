@@ -12,6 +12,7 @@ export interface VisitorLifeGroup {
 }
 
 export interface Visitor {
+  convertedAt: string | null;
   convertedMemberId: string | null;
   createdAt: string;
   email: string | null;

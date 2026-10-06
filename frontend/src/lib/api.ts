@@ -338,6 +338,7 @@ export type VisitorStatus = 'active' | 'converted'
 export type VisitorListStatus = VisitorStatus | 'all'
 
 export interface Visitor {
+  convertedAt: string | null
   convertedMemberId: string | null
   createdAt: string
   email: string | null
@@ -762,6 +763,7 @@ function isHarvestParticipation(value: unknown): value is HarvestParticipation {
 function isVisitor(value: unknown): value is Visitor {
   return (
     isRecord(value) &&
+    (typeof value.convertedAt === 'string' || value.convertedAt === null) &&
     (typeof value.convertedMemberId === 'string' || value.convertedMemberId === null) &&
     typeof value.createdAt === 'string' &&
     (typeof value.email === 'string' || value.email === null) &&
