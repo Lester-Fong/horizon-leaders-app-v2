@@ -149,7 +149,7 @@ export function LoginPage() {
           </div>
 
           <p className="mt-7 font-mono text-[0.625rem] leading-5 tracking-[0.06em] text-muted uppercase">
-            Access is limited to active Horizon staff accounts.
+            Accessing is limited to active Horizon staff accounts.
           </p>
         </div>
       </section>
