@@ -13,9 +13,8 @@ import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { RowActionsMenu, type RowAction } from '../components/ui/RowActionsMenu'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, closeHarvestEvent, closeSundayService, createHarvestEvent, createSundayService, getHarvestEvents, getSundayServices, updateHarvestEvent, updateSundayService, type HarvestEvent, type HarvestEventInput, type SundayService, type SundayServiceInput } from '../lib/api'
-import { supabase } from '../lib/supabase'
+import { getAccessToken as token } from '../lib/session'
 
-async function token() { const { data, error } = await supabase.auth.getSession(); if (error || !data.session) throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.'); return data.session.access_token }
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Event data is unavailable right now.' }
 function formatDate(value: string) { return new Intl.DateTimeFormat('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) }
 

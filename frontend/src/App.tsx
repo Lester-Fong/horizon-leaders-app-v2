@@ -1,4 +1,3 @@
-import { Users } from 'lucide-react'
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
@@ -11,7 +10,6 @@ import { AuthenticatedLayout } from './layouts/AuthenticatedLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { LifeGroupsPage } from './pages/LifeGroupsPage'
-import { ModulePlaceholderPage } from './pages/ModulePlaceholderPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { UnauthorizedPage } from './pages/UnauthorizedPage'
 import { ThemeProvider } from './theme/ThemeContext'
@@ -58,6 +56,14 @@ const FollowUpsPage = lazy(() =>
 
 const OpenCellPage = lazy(() =>
   import('./pages/OpenCellPage').then((module) => ({ default: module.OpenCellPage })),
+)
+
+const ProfilePage = lazy(() =>
+  import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })),
+)
+
+const UsersPage = lazy(() =>
+  import('./pages/UsersPage').then((module) => ({ default: module.UsersPage })),
 )
 
 function App() {
@@ -184,12 +190,18 @@ function App() {
                 path="users"
                 element={
                   <RoleRoute allowedRoles={['admin']}>
-                    <ModulePlaceholderPage
-                      title="Users"
-                      description="Controlled staff-account management is reserved for a future Admin-only feature phase."
-                      icon={Users}
-                    />
+                    <Suspense fallback={<LoadingState title="Loading Users" description="Preparing staff account management." />}>
+                      <UsersPage />
+                    </Suspense>
                   </RoleRoute>
+                }
+              />
+              <Route
+                path="profile"
+                element={
+                  <Suspense fallback={<LoadingState title="Loading your profile" description="Retrieving your staff account details." />}>
+                    <ProfilePage />
+                  </Suspense>
                 }
               />
               <Route path="unauthorized" element={<UnauthorizedPage />} />

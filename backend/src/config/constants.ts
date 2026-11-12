@@ -8,3 +8,7 @@ export const UPLOAD_BUCKET = "horizon-uploads";
 export const UPLOAD_SIGNED_URL_TTL_SECONDS = 15 * 60;
 export const MAX_UPLOAD_INPUT_BYTES = 5 * 1024 * 1024;
 export const MAX_STORED_IMAGE_DIMENSION = 1600;
+
+/** Staff account password policy enforced by the Users API before Supabase Auth. */
+export const USER_PASSWORD_MIN_LENGTH = 10;
+export const USER_PASSWORD_MAX_LENGTH = 72;

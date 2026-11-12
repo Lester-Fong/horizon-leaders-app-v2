@@ -8,13 +8,7 @@ import { EmptyState, ErrorState, LoadingState } from '../components/ui/Feedback'
 import { FormField, Select } from '../components/ui/FormControls'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ApiError, getDashboard, getLifeGroups, type DashboardData, type DashboardPeriod, type LifeGroup } from '../lib/api'
-import { supabase } from '../lib/supabase'
-
-async function accessToken() {
-  const { data, error } = await supabase.auth.getSession()
-  if (error || !data.session) throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.')
-  return data.session.access_token
-}
+import { getAccessToken as accessToken } from '../lib/session'
 
 function Metric({ label, value, href }: { label: string; value: number; href: string }) {
   return <Link to={href} className="group border-b border-line py-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"><span className="hm-label">{label}</span><span className="mt-2 block text-3xl font-semibold tracking-tight text-ink">{value}</span><ArrowUpRight aria-hidden="true" className="mt-2 size-4 text-muted" /></Link>

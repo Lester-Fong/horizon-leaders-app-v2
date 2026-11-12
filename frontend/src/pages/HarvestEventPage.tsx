@@ -12,9 +12,8 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, createAndRegisterHarvestVisitor, getEventImage, getHarvestEvent, getHarvestParticipations, getVisitors, recordHarvestInterest, registerHarvestVisitor, removeEventImage, uploadEventImage, type HarvestEvent, type HarvestParticipation, type Visitor } from '../lib/api'
-import { supabase } from '../lib/supabase'
+import { getAccessToken as token } from '../lib/session'
 
-async function token() { const { data, error } = await supabase.auth.getSession(); if (error || !data.session) throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.'); return data.session.access_token }
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Harvest data is unavailable right now.' }
 function formatDate(value: string) { return new Intl.DateTimeFormat('en-PH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) }
 function participantName(participation: HarvestParticipation) { return `${participation.visitor.firstName} ${participation.visitor.lastName}` }

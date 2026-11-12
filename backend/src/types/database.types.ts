@@ -1064,6 +1064,10 @@ export type Database = {
       normalize_member_email: { Args: { value: string }; Returns: string }
       normalize_member_phone: { Args: { value: string }; Returns: string }
       opencell_participation_threshold_percent: { Args: never; Returns: number }
+      profile_has_references: {
+        Args: { p_profile_id: string }
+        Returns: boolean
+      }
       reconcile_sunday_services: {
         Args: never
         Returns: {

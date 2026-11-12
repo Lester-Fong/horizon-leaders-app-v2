@@ -44,6 +44,8 @@ import {
 } from "./visitors/types.js";
 import { DashboardServiceError, type DashboardService } from "./dashboard/types.js";
 import { UploadServiceError, type UploadService } from "./uploads/types.js";
+import { createUsersRouter } from "./routes/users.js";
+import { UserServiceError, type UserService } from "./users/types.js";
 
 export interface AppDependencies {
   authService: AuthService;
@@ -59,6 +61,7 @@ export interface AppDependencies {
   visitorService?: VisitorService;
   dashboardService?: DashboardService;
   uploadService?: UploadService;
+  userService?: UserService;
 }
 
 const DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:5173";
@@ -282,6 +285,16 @@ function unavailableVisitor(): never {
   );
 }
 function unavailableOpenCell(): never { throw new OpenCellServiceError(500,"OPENCELL_SERVICE_UNAVAILABLE","OpenCell data is temporarily unavailable."); }
+const unavailableUserService: UserService = {
+  create: async () => unavailableUser(),
+  delete: async () => unavailableUser(),
+  getById: async () => unavailableUser(),
+  list: async () => unavailableUser(),
+  resetPassword: async () => unavailableUser(),
+  setActive: async () => unavailableUser(),
+  update: async () => unavailableUser(),
+};
+function unavailableUser(): never { throw new UserServiceError(500, "USER_SERVICE_UNAVAILABLE", "User data is temporarily unavailable."); }
 function unavailableUpload(): never { throw new UploadServiceError(500, "UPLOAD_SERVICE_UNAVAILABLE", "Image storage is temporarily unavailable."); }
 
 export function createApp({
@@ -298,6 +311,7 @@ export function createApp({
   dashboardService = unavailableDashboardService,
   visitorService = unavailableVisitorService,
   uploadService = unavailableUploadService,
+  userService = unavailableUserService,
 }: AppDependencies) {
   const app = express();
 
@@ -324,6 +338,7 @@ export function createApp({
   app.use("/api", createDashboardRouter(authService, dashboardService));
   app.use("/api", createVisitorsRouter(authService, visitorService));
   app.use("/api", createUploadsRouter(authService, uploadService));
+  app.use("/api", createUsersRouter(authService, userService));
   app.use("/api", (_request, response) => {
     response.status(404).json({
       error: {

@@ -1525,3 +1525,136 @@ export function removeOpenCellEnrollment(accessToken:string,id:string,visitorId:
 export function getOpenCellAttendance(accessToken:string,pid:string,sid:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance`,isAttendanceList)}
 export function addOpenCellAttendance(accessToken:string,pid:string,sid:string,visitorId:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance`,isAny,{method:'POST',body:JSON.stringify({visitorId})})}
 export function removeOpenCellAttendance(accessToken:string,pid:string,sid:string,visitorId:string){return requestApi(accessToken,`/opencell/programmes/${pid}/sessions/${sid}/attendance/${visitorId}`,isAny,{method:'DELETE'})}
+
+export interface ManagedUserLifeGroup {
+  id: string
+  isActive: boolean
+  name: string
+}
+
+export interface ManagedUser {
+  assignedLifeGroup: ManagedUserLifeGroup | null
+  createdAt: string
+  email: string | null
+  id: string
+  isActive: boolean
+  lastSignInAt: string | null
+  name: string
+  role: AppRole
+  updatedAt: string
+}
+
+export type UserListStatus = 'active' | 'inactive' | 'all'
+
+export interface UserListFilters {
+  search?: string
+  status?: UserListStatus
+}
+
+export interface CreateUserInput {
+  email: string
+  name: string
+  password: string
+  role: AppRole
+}
+
+export interface UpdateUserInput {
+  email?: string
+  name?: string
+  role?: AppRole
+}
+
+/** Mirrors the server staff password policy so the form can explain failures early. */
+export const USER_PASSWORD_MIN_LENGTH = 10
+export const USER_PASSWORD_MAX_LENGTH = 72
+export const USER_PASSWORD_HINT = `${USER_PASSWORD_MIN_LENGTH}-${USER_PASSWORD_MAX_LENGTH} characters with an uppercase letter, a lowercase letter, and a number.`
+
+export function isStrongUserPassword(value: string) {
+  return (
+    value.length >= USER_PASSWORD_MIN_LENGTH &&
+    value.length <= USER_PASSWORD_MAX_LENGTH &&
+    /[A-Z]/.test(value) &&
+    /[a-z]/.test(value) &&
+    /\d/.test(value)
+  )
+}
+
+function isManagedUserLifeGroup(value: unknown): value is ManagedUserLifeGroup {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    typeof value.name === 'string'
+  )
+}
+
+function isManagedUser(value: unknown): value is ManagedUser {
+  return (
+    isRecord(value) &&
+    (value.assignedLifeGroup === null || isManagedUserLifeGroup(value.assignedLifeGroup)) &&
+    typeof value.createdAt === 'string' &&
+    (typeof value.email === 'string' || value.email === null) &&
+    typeof value.id === 'string' &&
+    typeof value.isActive === 'boolean' &&
+    (typeof value.lastSignInAt === 'string' || value.lastSignInAt === null) &&
+    typeof value.name === 'string' &&
+    (value.role === 'admin' || value.role === 'leader') &&
+    typeof value.updatedAt === 'string'
+  )
+}
+
+const isManagedUserList = (value: unknown): value is ManagedUser[] =>
+  Array.isArray(value) && value.every(isManagedUser)
+
+const isUserIdResult = (value: unknown): value is { id: string } =>
+  isRecord(value) && typeof value.id === 'string'
+
+export function getUsers(accessToken: string, filters: UserListFilters = {}) {
+  const searchParameters = new URLSearchParams()
+  if (filters.search) searchParameters.set('search', filters.search)
+  if (filters.status) searchParameters.set('status', filters.status)
+  const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
+  return requestApi(accessToken, `/users${query}`, isManagedUserList)
+}
+
+export function createUser(accessToken: string, input: CreateUserInput) {
+  return requestApi(accessToken, '/users', isManagedUser, {
+    body: JSON.stringify(input),
+    method: 'POST',
+  })
+}
+
+export function updateUser(accessToken: string, userId: string, input: UpdateUserInput) {
+  return requestApi(accessToken, `/users/${userId}`, isManagedUser, {
+    body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+export function setUserActive(accessToken: string, userId: string, isActive: boolean) {
+  return requestApi(accessToken, `/users/${userId}/status`, isManagedUser, {
+    body: JSON.stringify({ isActive }),
+    method: 'PATCH',
+  })
+}
+
+export function resetUserPassword(accessToken: string, userId: string, password: string) {
+  return requestApi(accessToken, `/users/${userId}/password`, isUserIdResult, {
+    body: JSON.stringify({ password }),
+    method: 'PUT',
+  })
+}
+
+export function getUser(accessToken: string, userId: string) {
+  return requestApi(accessToken, `/users/${userId}`, isManagedUser)
+}
+
+export function getMyProfile(accessToken: string) {
+  return requestApi(accessToken, '/me/profile', isManagedUser)
+}
+
+export function deleteUser(accessToken: string, userId: string) {
+  return requestApi(accessToken, `/users/${userId}`, isUserIdResult, {
+    method: 'DELETE',
+  })
+}

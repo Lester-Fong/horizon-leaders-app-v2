@@ -83,6 +83,7 @@ test('major Admin screens and shared overlays meet the automated accessibility b
     { heading: 'Events', path: '/events' },
     { heading: 'Follow Up', path: '/follow-up' },
     { heading: 'OpenCell', path: '/opencell' },
+    { heading: 'Users', path: '/users' },
   ]
 
   for (const screen of screens) {

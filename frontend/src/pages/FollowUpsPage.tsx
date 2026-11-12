@@ -30,21 +30,13 @@ import {
   type FollowUp,
   type FollowUpStatus,
 } from '../lib/api'
-import { supabase } from '../lib/supabase'
+import { getAccessToken } from '../lib/session'
 
 const dateFormatter = new Intl.DateTimeFormat('en-PH', {
   dateStyle: 'medium',
   timeStyle: 'short',
   timeZone: 'Asia/Manila',
 })
-
-async function getAccessToken() {
-  const { data, error } = await supabase.auth.getSession()
-  if (error || !data.session) {
-    throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.')
-  }
-  return data.session.access_token
-}
 
 function getErrorMessage(error: unknown) {
   return error instanceof ApiError

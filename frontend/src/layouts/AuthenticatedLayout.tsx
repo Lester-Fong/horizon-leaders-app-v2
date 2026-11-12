@@ -136,22 +136,33 @@ interface UserAreaProps {
   actor: { name: string; role: string }
   isSigningOut: boolean
   onLogout(): void
+  onNavigate?: () => void
 }
 
-function UserArea({ actor, isSigningOut, onLogout }: UserAreaProps) {
+function UserArea({ actor, isSigningOut, onLogout, onNavigate }: UserAreaProps) {
   return (
     <div className="border-t border-line pt-4">
-      <div className="flex items-center gap-3 px-2">
+      <NavLink
+        to="/profile"
+        onClick={onNavigate}
+        aria-label={`My profile: ${actor.name}`}
+        className={({ isActive }) =>
+          cn(
+            'flex min-h-11 items-center gap-3 rounded-control px-2 py-1 transition-colors hover:bg-surface-subtle',
+            isActive && 'bg-surface-subtle',
+          )
+        }
+      >
         <div className="grid size-8 shrink-0 place-items-center rounded-full border border-line-strong font-mono text-[0.65rem] font-semibold text-ink">
           {getInitials(actor.name)}
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-ink">{actor.name}</p>
           <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.08em] text-muted uppercase">
-            {actor.role}
+            {actor.role} · Profile
           </p>
         </div>
-      </div>
+      </NavLink>
       <ThemeToggle className="mt-4 px-2" />
       <Button
         variant="ghost"
@@ -315,6 +326,7 @@ export function AuthenticatedLayout() {
             </div>
             <PrimaryNavigation onNavigate={() => setIsMobileNavigationOpen(false)} />
             <UserArea
+              onNavigate={() => setIsMobileNavigationOpen(false)}
               actor={actor}
               isSigningOut={isSigningOut}
               onLogout={() => void handleLogout()}

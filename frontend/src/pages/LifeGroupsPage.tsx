@@ -45,7 +45,7 @@ import {
   type LifeGroup,
   type LifeGroupRoster,
 } from '../lib/api'
-import { supabase } from '../lib/supabase'
+import { getAccessToken } from '../lib/session'
 
 interface FormState {
   description: string
@@ -62,14 +62,6 @@ const EMPTY_FORM: FormState = {
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
   return 'Life Group data is unavailable right now. Please try again.'
-}
-
-async function getAccessToken() {
-  const { data, error } = await supabase.auth.getSession()
-  if (error || !data.session) {
-    throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.')
-  }
-  return data.session.access_token
 }
 
 export function LifeGroupsPage() {
@@ -129,6 +121,28 @@ export function LifeGroupsPage() {
     const loadTimer = window.setTimeout(() => void loadData(), 0)
     return () => window.clearTimeout(loadTimer)
   }, [loadData])
+
+  /**
+   * Why an active group's Leader can no longer lead it, or null when the Leader is eligible.
+   * Leader options list every Leader-role profile (Admins only), so a missing entry means
+   * the profile was changed to Admin.
+   */
+  const leaderIssue = useCallback(
+    (group: LifeGroup): string | null => {
+      if (!isAdmin || !group.isActive) return null
+      if (!group.leader.isActive) return 'Leader is deactivated'
+      if (!leaders.some((leader) => leader.id === group.leader.id)) {
+        return 'Leader is now an Admin'
+      }
+      return null
+    },
+    [isAdmin, leaders],
+  )
+
+  const groupsNeedingLeader = useMemo(
+    () => groups.filter((group) => leaderIssue(group) !== null),
+    [groups, leaderIssue],
+  )
 
   const selectableLeaders = useMemo(
     () =>
@@ -345,6 +359,25 @@ export function LifeGroupsPage() {
       />
 
       {notice && <FeedbackBanner tone="success">{notice}</FeedbackBanner>}
+      {groupsNeedingLeader.length > 0 && (
+        <FeedbackBanner
+          tone="warning"
+          title={
+            groupsNeedingLeader.length === 1
+              ? '1 Life Group needs a new Leader'
+              : `${groupsNeedingLeader.length} Life Groups need a new Leader`
+          }
+        >
+          <ul className="mt-1 space-y-1">
+            {groupsNeedingLeader.map((group) => (
+              <li key={group.id}>
+                {group.name}: {leaderIssue(group)?.toLowerCase()} ({group.leader.name}).
+                Use Edit Life Group to assign an active Leader.
+              </li>
+            ))}
+          </ul>
+        </FeedbackBanner>
+      )}
       {loadError && <FeedbackBanner tone="error">{loadError}</FeedbackBanner>}
 
       {groups.length === 0 ? (
@@ -387,10 +420,18 @@ export function LifeGroupsPage() {
                 <td className="life-group-cell-leader">
                   <span className="hm-table-mobile-label">Leader</span>
                   <p className="font-medium text-ink">{group.leader.name}</p>
-                  {!group.leader.isActive && (
-                    <p className="mt-1 text-xs font-medium text-muted">
-                      Inactive Leader profile
+                  {leaderIssue(group) ? (
+                    <p className="mt-1">
+                      <StatusBadge tone="warning">
+                        Needs new Leader · {leaderIssue(group)}
+                      </StatusBadge>
                     </p>
+                  ) : (
+                    !group.leader.isActive && (
+                      <p className="mt-1 text-xs font-medium text-muted">
+                        Inactive Leader profile
+                      </p>
+                    )
                   )}
                 </td>
                 <td className="life-group-cell-status">

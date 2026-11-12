@@ -55,15 +55,7 @@ import {
   type MemberAgeFilter,
   type MemberGenderFilter,
 } from '../lib/api'
-import { supabase } from '../lib/supabase'
-
-async function getAccessToken() {
-  const { data, error } = await supabase.auth.getSession()
-  if (error || !data.session) {
-    throw new ApiError(401, 'UNAUTHENTICATED', 'Your session has expired.')
-  }
-  return data.session.access_token
-}
+import { getAccessToken } from '../lib/session'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
