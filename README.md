@@ -182,7 +182,6 @@ Recovery behavior:
 | One pgTAP file | `npm run supabase -- test db supabase/tests/database/<name>.test.sql` |
 | Frontend unit tests | `npm --prefix frontend test` |
 | Current seeded browser state | `npm run test:e2e` |
-| Users E2E, isolated (no seed/reset; creates and removes only its own local records) | `npx playwright test e2e/users.spec.ts` |
 | Destructive reset + seed + E2E | `npm run test:e2e:seeded` |
 | Accessibility/responsive/browser matrix | `npm run test:e2e:qa005` |
 | Backend lint/build | `npm --prefix backend run lint` / `npm --prefix backend run build` |

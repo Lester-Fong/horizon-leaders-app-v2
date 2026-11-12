@@ -32,5 +32,3 @@ Thumbs.db
 docs/
 AGENTS.md
 .agents/
-CLAUDE.md
-supabase/config.toml
