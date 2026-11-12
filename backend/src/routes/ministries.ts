@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
@@ -8,78 +8,27 @@ import {
   type MinistryService,
   type UpdateMinistryInput,
 } from "../ministries/types.js";
+import { createRequestHandler, sendError } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readOptionalText,
+  readRequiredText,
+  readUuid,
+} from "../http/validation.js";
 
-interface ApiErrorBody {
-  error: { code: string; message: string };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MINISTRY_FIELDS = new Set(["description", "name"]);
 
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function hasUnknownFields(record: Record<string, unknown>) {
-  return Object.keys(record).some((key) => !MINISTRY_FIELDS.has(key));
-}
-
-function readRequiredName(value: unknown) {
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  return value.trim();
-}
-
-function readDescription(value: unknown) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return undefined;
-  return value.trim() || null;
-}
-
-function readUuid(value: unknown) {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) return undefined;
-  return value;
-}
+const handleRequest = createRequestHandler(MinistryServiceError, {
+  code: "MINISTRY_SERVICE_UNAVAILABLE",
+  message: "Ministry data is temporarily unavailable.",
+});
 
 function readStatus(value: unknown): MinistryListStatus | undefined {
   return value === "active" || value === "archived" || value === "all"
     ? value
     : undefined;
-}
-
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    const data = await operation();
-    response.status(successStatus).json({ data });
-  } catch (error) {
-    if (error instanceof MinistryServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-    sendError(
-      response,
-      500,
-      "MINISTRY_SERVICE_UNAVAILABLE",
-      "Ministry data is temporarily unavailable.",
-    );
-  }
 }
 
 export function createMinistriesRouter(
@@ -178,7 +127,7 @@ export function createMinistriesRouter(
     authenticated,
     adminOnly,
     async (request, response) => {
-      if (!isRecord(request.body) || hasUnknownFields(request.body)) {
+      if (!isRecord(request.body) || hasUnknownFields(request.body, MINISTRY_FIELDS)) {
         sendError(
           response,
           400,
@@ -187,8 +136,8 @@ export function createMinistriesRouter(
         );
         return;
       }
-      const name = readRequiredName(request.body.name);
-      const description = readDescription(request.body.description);
+      const name = readRequiredText(request.body.name);
+      const description = readOptionalText(request.body.description);
       if (!name || description === undefined) {
         sendError(
           response,
@@ -215,7 +164,7 @@ export function createMinistriesRouter(
       if (
         !ministryId ||
         !isRecord(request.body) ||
-        hasUnknownFields(request.body)
+        hasUnknownFields(request.body, MINISTRY_FIELDS)
       ) {
         sendError(
           response,
@@ -228,7 +177,7 @@ export function createMinistriesRouter(
 
       const update: UpdateMinistryInput = {};
       if (hasOwn(request.body, "name")) {
-        const name = readRequiredName(request.body.name);
+        const name = readRequiredText(request.body.name);
         if (!name) {
           sendError(
             response,
@@ -241,7 +190,7 @@ export function createMinistriesRouter(
         update.name = name;
       }
       if (hasOwn(request.body, "description")) {
-        const description = readDescription(request.body.description);
+        const description = readOptionalText(request.body.description);
         if (description === undefined) {
           sendError(
             response,

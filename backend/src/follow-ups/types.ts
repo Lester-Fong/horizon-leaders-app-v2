@@ -1,4 +1,5 @@
 import type { HorizonActor } from "../auth/types.js";
+import type { Page, PageRequest } from "../http/pagination.js";
 import type { Enums, Json } from "../types/database.types.js";
 
 export type FollowUpReason = Enums<"follow_up_reason">;
@@ -58,7 +59,14 @@ export interface FollowUpService {
     followUpId: string,
     completionNote: string | null,
   ): Promise<FollowUp>;
+  /** Every Follow Up with this status, read in batches past the row cap. */
   list(actor: HorizonActor, status: FollowUpStatus): Promise<FollowUp[]>;
+  /** One page of Follow Ups with this status, with the exact total. */
+  listPage(
+    actor: HorizonActor,
+    status: FollowUpStatus,
+    page: PageRequest,
+  ): Promise<Page<FollowUp>>;
   triggerSundayAbsence(
     memberId: string,
     context: SundayAbsenceFollowUpContext,

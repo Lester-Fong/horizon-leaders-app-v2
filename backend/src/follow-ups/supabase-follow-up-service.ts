@@ -1,7 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
-import type { Database, Json, Tables } from "../types/database.types.js";
+import {
+  fetchAllRows,
+  fetchRowPage,
+  fetchRowsByIds,
+  type CountOptions,
+} from "../db/range-queries.js";
+import { buildPageMeta } from "../http/pagination.js";
+import type { Database } from "../types/database.overrides.js";
+import type { Json, Tables } from "../types/database.types.js";
 import {
   FOLLOW_UP_REASON_LABELS,
   FollowUpServiceError,
@@ -70,18 +78,21 @@ export function createSupabaseFollowUpService({
     },
   });
 
-  async function getRows(status: FollowUpStatus, followUpId?: string) {
-    let query = supabase
+  /** Active oldest first; History most recently completed first; `id` breaks ties. */
+  function buildStatusQuery(status: FollowUpStatus, countOptions?: CountOptions) {
+    const query = supabase
       .from("follow_ups")
-      .select(FOLLOW_UP_COLUMNS)
+      .select(FOLLOW_UP_COLUMNS, countOptions)
       .eq("status", status);
-
-    if (followUpId) query = query.eq("id", followUpId);
-    query = status === "active"
+    return status === "active"
       ? query.order("created_at").order("id")
       : query.order("completed_at", { ascending: false }).order("id");
+  }
 
-    const { data, error } = await query;
+  async function getRows(status: FollowUpStatus, followUpId?: string) {
+    const { data, error } = followUpId
+      ? await buildStatusQuery(status).eq("id", followUpId)
+      : await fetchAllRows(() => buildStatusQuery(status));
     if (error) throw serviceUnavailable();
     return data;
   }
@@ -94,15 +105,15 @@ export function createSupabaseFollowUpService({
     );
 
     const [memberResult, visitorResult, profileResult] = await Promise.all([
-      memberIds.length
-        ? supabase.from("members").select("id, first_name, last_name, is_active").in("id", memberIds)
-        : Promise.resolve({ data: [] as MemberSubjectRow[], error: null }),
-      visitorIds.length
-        ? supabase.from("visitors").select("id, first_name, last_name, status").in("id", visitorIds)
-        : Promise.resolve({ data: [] as VisitorSubjectRow[], error: null }),
-      profileIds.length
-        ? supabase.from("profiles").select("id, name").in("id", profileIds)
-        : Promise.resolve({ data: [] as ProfileRow[], error: null }),
+      fetchRowsByIds<MemberSubjectRow>(memberIds, (ids) =>
+        supabase.from("members").select("id, first_name, last_name, is_active").in("id", ids),
+      ),
+      fetchRowsByIds<VisitorSubjectRow>(visitorIds, (ids) =>
+        supabase.from("visitors").select("id, first_name, last_name, status").in("id", ids),
+      ),
+      fetchRowsByIds<ProfileRow>(profileIds, (ids) =>
+        supabase.from("profiles").select("id, name").in("id", ids),
+      ),
     ]);
 
     if (memberResult.error || visitorResult.error || profileResult.error) {
@@ -169,6 +180,16 @@ export function createSupabaseFollowUpService({
       return mapRows(await getRows(status));
     },
 
+    async listPage(_actor: HorizonActor, status: FollowUpStatus, page) {
+      const { data, error } = await fetchRowPage(
+        (countOptions) => buildStatusQuery(status, countOptions),
+        page,
+      );
+      if (error) throw serviceUnavailable();
+      const items = await mapRows(data.rows);
+      return { items, meta: buildPageMeta(page, data.total, items.length) };
+    },
+
     async complete(actor, followUpId, completionNote) {
       const { data, error } = await supabase.rpc("complete_follow_up", {
         p_completed_by_profile_id: actor.id,
@@ -200,10 +221,9 @@ export function createSupabaseFollowUpService({
 
       const rpcArguments: Database["public"]["Functions"]["create_follow_up_if_absent"]["Args"] = {
         p_context: context as unknown as Json,
-        // Generated function-argument types do not represent nullable PostgreSQL inputs.
         p_member_id: memberId,
         p_reason: "consecutive_sunday_absence",
-        p_visitor_id: null as unknown as string,
+        p_visitor_id: null,
       };
       const { data, error } = await supabase.rpc("create_follow_up_if_absent", rpcArguments);
       if (error?.code === "23503") throw followUpNotFound();

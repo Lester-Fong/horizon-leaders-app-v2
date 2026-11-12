@@ -180,6 +180,29 @@ describeWithLocalSupabase("Life Group API with local Supabase", () => {
     expect(edited.status).toBe(200);
     expect(edited.body.data.leader.id).toBe(leaderCId);
 
+    // DEC-073: an assigned Leader may be deactivated; renaming the group with the
+    // unchanged Leader still works, but a reassignment to an inactive Leader does not.
+    const { error: deactivateError } = await adminClient
+      .from("profiles")
+      .update({ is_active: false })
+      .eq("id", leaderCId);
+    if (deactivateError) throw deactivateError;
+    const renamedWithInactiveLeader = await asAdmin(
+      "patch",
+      `/api/life-groups/${created.body.data.id}`,
+    ).send({ leaderProfileId: leaderCId, name: "Integration North Renamed" });
+    expect(renamedWithInactiveLeader.status).toBe(200);
+    expect(renamedWithInactiveLeader.body.data).toMatchObject({
+      leader: { id: leaderCId, isActive: false },
+      name: "Integration North Renamed",
+    });
+    const reassignedToInactive = await asAdmin(
+      "patch",
+      `/api/life-groups/${second.body.data.id}`,
+    ).send({ leaderProfileId: inactiveLeaderId, name: "Integration South" });
+    expect(reassignedToInactive.status).toBe(422);
+    expect(reassignedToInactive.body.error.code).toBe("LEADER_INACTIVE");
+
     const archived = await asAdmin(
       "patch",
       `/api/life-groups/${created.body.data.id}/status`,

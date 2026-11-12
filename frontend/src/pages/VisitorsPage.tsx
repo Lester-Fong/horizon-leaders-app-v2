@@ -18,6 +18,7 @@ import {
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
 import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -29,7 +30,7 @@ import {
   createVisitor,
   getLifeGroups,
   getVisitor,
-  getVisitors,
+  getVisitorsPage,
   setVisitorLifeGroup,
   updateVisitor,
   type LifeGroup,
@@ -38,6 +39,7 @@ import {
   type VisitorListStatus,
 } from '../lib/api'
 import { getAccessToken } from '../lib/session'
+import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -56,7 +58,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 export function VisitorsPage() {
   const { actor } = useAuth()
   const isAdmin = actor?.role === 'admin'
-  const [visitors, setVisitors] = useState<Visitor[]>([])
+  const visitorList = usePagedList<Visitor>(getErrorMessage)
+  const { items: visitors, loadMore, replace: replaceVisitors } = visitorList
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -102,25 +105,39 @@ export function VisitorsPage() {
     )
   }
 
+  const visitorFilters = useMemo(
+    () => isAdmin
+      ? { ...(search ? { search } : {}), status: statusFilter }
+      : { ...(search ? { search } : {}) },
+    [isAdmin, search, statusFilter],
+  )
+
+  // Changing search or status reloads from the first page.
   const loadDirectory = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
     try {
       const token = await getAccessToken()
-      const [visitorData, lifeGroupData] = await Promise.all([
-        getVisitors(token, isAdmin
-          ? { ...(search ? { search } : {}), status: statusFilter }
-          : { ...(search ? { search } : {}) }),
+      const [visitorPage, lifeGroupData] = await Promise.all([
+        getVisitorsPage(token, visitorFilters, DIRECTORY_FIRST_PAGE),
         getLifeGroups(token),
       ])
-      setVisitors(visitorData)
+      replaceVisitors(visitorPage)
       setLifeGroups(lifeGroupData)
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [isAdmin, search, statusFilter])
+  }, [replaceVisitors, visitorFilters])
+
+  const loadMoreVisitors = useCallback(
+    () =>
+      loadMore(async (page) =>
+        getVisitorsPage(await getAccessToken(), visitorFilters, page),
+      ),
+    [loadMore, visitorFilters],
+  )
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDirectory(), 0)
@@ -289,7 +306,7 @@ export function VisitorsPage() {
               {isAdmin ? 'Search within the selected Visitor status.' : 'Scope: Active Visitors only'}
             </p>
           </div>
-          {!isLoading && <p className="font-mono text-xs text-muted" aria-live="polite">{visitors.length} {visitors.length === 1 ? 'Visitor' : 'Visitors'}</p>}
+          {!isLoading && <p className="font-mono text-xs text-muted" aria-live="polite">{visitorList.total} {visitorList.total === 1 ? 'Visitor' : 'Visitors'}</p>}
         </div>
         <form className="grid gap-4 md:grid-cols-[minmax(14rem,1fr)_auto] xl:grid-cols-[minmax(18rem,1fr)_11rem_auto]" onSubmit={handleSearch}>
           <FormField id="visitor-search" label="Search" description="Name, phone, or email">
@@ -354,6 +371,18 @@ export function VisitorsPage() {
             ))}
           </tbody>
         </ResponsiveTable>
+      )}
+
+      {!isLoading && visitors.length > 0 && (
+        <LoadMoreFooter
+          error={visitorList.loadMoreError}
+          hasMore={visitorList.hasMore}
+          isLoading={visitorList.isLoadingMore}
+          label="Visitors"
+          onLoadMore={() => void loadMoreVisitors()}
+          shown={visitors.length}
+          total={visitorList.total}
+        />
       )}
 
       {formContext && (

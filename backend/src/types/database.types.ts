@@ -861,6 +861,39 @@ export type Database = {
           },
         ]
       }
+      user_audit_events: {
+        Row: {
+          action: string
+          actor_name: string
+          actor_profile_id: string
+          created_at: string
+          details: Json
+          id: string
+          target_name: string
+          target_user_id: string
+        }
+        Insert: {
+          action: string
+          actor_name: string
+          actor_profile_id: string
+          created_at?: string
+          details?: Json
+          id?: string
+          target_name: string
+          target_user_id: string
+        }
+        Update: {
+          action?: string
+          actor_name?: string
+          actor_profile_id?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          target_name?: string
+          target_user_id?: string
+        }
+        Relationships: []
+      }
       visitors: {
         Row: {
           converted_at: string | null
@@ -950,8 +983,8 @@ export type Database = {
       }
       convert_visitor_to_member: {
         Args: {
-          p_expected_life_group_id: string | null
-          p_life_group_id: string | null
+          p_expected_life_group_id: string
+          p_life_group_id: string
           p_qr_token: string
           p_visitor_id: string
         }
@@ -1015,7 +1048,7 @@ export type Database = {
         }[]
       }
       dashboard_member_demographics: {
-        Args: { p_as_of_date: string; p_life_group_id: string | null }
+        Args: { p_as_of_date: string; p_life_group_id: string }
         Returns: {
           bucket_count: number
           bucket_key: string
@@ -1023,7 +1056,7 @@ export type Database = {
         }[]
       }
       dashboard_sunday_attendance: {
-        Args: { p_event_ids: string[]; p_life_group_id: string | null }
+        Args: { p_event_ids: string[]; p_life_group_id: string }
         Returns: {
           eligible_count: number
           event_id: string
@@ -1093,10 +1126,11 @@ export type Database = {
         Args: { p_programme_id: string; p_visitor_id: string }
         Returns: string
       }
+      revoke_user_sessions: { Args: { p_user_id: string }; Returns: number }
       set_visitor_life_group: {
         Args: {
-          p_expected_life_group_id: string | null
-          p_life_group_id: string | null
+          p_expected_life_group_id: string
+          p_life_group_id: string
           p_visitor_id: string
         }
         Returns: string

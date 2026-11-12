@@ -12,10 +12,11 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, createAndRegisterHarvestVisitor, getEventImage, getHarvestEvent, getHarvestParticipations, getVisitors, recordHarvestInterest, registerHarvestVisitor, removeEventImage, uploadEventImage, type HarvestEvent, type HarvestParticipation, type Visitor } from '../lib/api'
+import { formatCalendarDateLong } from '../lib/dates'
 import { getAccessToken as token } from '../lib/session'
 
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Harvest data is unavailable right now.' }
-function formatDate(value: string) { return new Intl.DateTimeFormat('en-PH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) }
+const formatDate = formatCalendarDateLong
 function participantName(participation: HarvestParticipation) { return `${participation.visitor.firstName} ${participation.visitor.lastName}` }
 function interestLabel(value: boolean | null) { return value === true ? 'Interested' : value === false ? 'Not interested' : 'Not recorded' }
 

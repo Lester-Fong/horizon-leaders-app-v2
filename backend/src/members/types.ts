@@ -1,4 +1,5 @@
 import type { HorizonActor } from "../auth/types.js";
+import type { Page, PageRequest } from "../http/pagination.js";
 import type { Enums } from "../types/database.types.js";
 
 export type MemberGender = Enums<"member_gender">;
@@ -98,7 +99,14 @@ export interface MemberService {
   archive(memberId: string): Promise<Member>;
   create(actor: HorizonActor, input: CreateMemberInput): Promise<Member>;
   getById(actor: HorizonActor, memberId: string): Promise<Member>;
+  /** Every matching Member, read in batches so nothing is cut at the row cap. */
   list(actor: HorizonActor, options: ListMembersOptions): Promise<Member[]>;
+  /** One page of matching Members after scope and filters, with the exact total. */
+  listPage(
+    actor: HorizonActor,
+    options: ListMembersOptions,
+    page: PageRequest,
+  ): Promise<Page<Member>>;
   update(
     actor: HorizonActor,
     memberId: string,

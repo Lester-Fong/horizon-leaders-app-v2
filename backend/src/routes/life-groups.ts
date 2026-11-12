@@ -1,4 +1,4 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
@@ -7,72 +7,19 @@ import {
   type LifeGroupService,
   type UpdateLifeGroupInput,
 } from "../life-groups/types.js";
+import { createRequestHandler, sendError } from "../http/responses.js";
+import {
+  hasOwn,
+  isRecord,
+  readOptionalText,
+  readRequiredText,
+  readUuid,
+} from "../http/validation.js";
 
-interface ApiErrorBody {
-  error: {
-    code: string;
-    message: string;
-  };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function readRequiredName(value: unknown) {
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  return value.trim();
-}
-
-function readDescription(value: unknown) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return undefined;
-  return value.trim() || null;
-}
-
-function readUuid(value: unknown) {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) return undefined;
-  return value;
-}
-
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    const data = await operation();
-    response.status(successStatus).json({ data });
-  } catch (error) {
-    if (error instanceof LifeGroupServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-
-    sendError(
-      response,
-      500,
-      "LIFE_GROUP_SERVICE_UNAVAILABLE",
-      "Life Group data is temporarily unavailable.",
-    );
-  }
-}
+const handleRequest = createRequestHandler(LifeGroupServiceError, {
+  code: "LIFE_GROUP_SERVICE_UNAVAILABLE",
+  message: "Life Group data is temporarily unavailable.",
+});
 
 export function createLifeGroupsRouter(
   authService: AuthService,
@@ -160,8 +107,8 @@ export function createLifeGroupsRouter(
         return;
       }
 
-      const name = readRequiredName(request.body.name);
-      const description = readDescription(request.body.description);
+      const name = readRequiredText(request.body.name);
+      const description = readOptionalText(request.body.description);
       const leaderProfileId = readUuid(request.body.leaderProfileId);
 
       if (!name) {
@@ -222,7 +169,7 @@ export function createLifeGroupsRouter(
       const update: UpdateLifeGroupInput = {};
 
       if (hasOwn(request.body, "name")) {
-        const name = readRequiredName(request.body.name);
+        const name = readRequiredText(request.body.name);
         if (!name) {
           sendError(
             response,
@@ -236,7 +183,7 @@ export function createLifeGroupsRouter(
       }
 
       if (hasOwn(request.body, "description")) {
-        const description = readDescription(request.body.description);
+        const description = readOptionalText(request.body.description);
         if (description === undefined) {
           sendError(
             response,

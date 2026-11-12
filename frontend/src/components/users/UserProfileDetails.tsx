@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { ManagedUser } from '../../lib/api'
+import { formatTimestampDate, formatTimestampDateTime } from '../../lib/dates'
 import { StatusBadge } from '../ui/StatusBadge'
 
 interface UserProfileDetailsProps {
@@ -9,12 +10,7 @@ interface UserProfileDetailsProps {
 
 function formatDate(value: string | null, withTime = false) {
   if (!value) return 'Never'
-  return new Date(value).toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}),
-  })
+  return withTime ? formatTimestampDateTime(value) : formatTimestampDate(value)
 }
 
 function getInitials(name: string) {

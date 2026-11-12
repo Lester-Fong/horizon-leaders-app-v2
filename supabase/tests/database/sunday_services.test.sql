@@ -61,7 +61,7 @@ insert into public.events (id, type, title, event_date, created_by_profile_id) v
   ('88888888-8888-4888-8888-888888888882', 'service', 'Closing Service', '2026-08-30', '81111111-1111-4111-8111-111111111111'),
   ('88888888-8888-4888-8888-888888888883', 'service', 'Visitor Service', '2026-09-06', '81111111-1111-4111-8111-111111111111');
 
-select is((select count(*) from public.events), 3::bigint, 'valid Sunday Services can be created');
+select is((select count(*) from public.events where id in ('88888888-8888-4888-8888-888888888881', '88888888-8888-4888-8888-888888888882', '88888888-8888-4888-8888-888888888883')), 3::bigint, 'valid Sunday Services can be created');
 select ok((select status = 'open' and counts_for_absence from public.events where id = '88888888-8888-4888-8888-888888888881'), 'new Services default open and counting');
 select ok((select created_at is not null and updated_at is not null from public.events where id = '88888888-8888-4888-8888-888888888881'), 'Service timestamps default from the database');
 update public.events set title = 'Corrected Service', updated_at = '2000-01-01 00:00:00+00' where id = '88888888-8888-4888-8888-888888888881';
@@ -83,7 +83,7 @@ do $$ begin begin update public.events set created_by_profile_id = '82222222-222
 select pass('Event creator is immutable');
 
 insert into public.sunday_service_presence (event_id, member_id) values ('88888888-8888-4888-8888-888888888881', '85555555-5555-4555-8555-555555555555');
-select is((select count(*) from public.sunday_service_presence), 1::bigint, 'valid Member presence can be recorded');
+select is((select count(*) from public.sunday_service_presence where event_id = '88888888-8888-4888-8888-888888888881' and member_id = '85555555-5555-4555-8555-555555555555'), 1::bigint, 'valid Member presence can be recorded');
 do $$ begin begin insert into public.sunday_service_presence values ('88888888-8888-4888-8888-888888888881', '85555555-5555-4555-8555-555555555555'); raise exception 'duplicate presence accepted'; exception when unique_violation then null; end; end $$;
 select pass('duplicate Member presence is rejected');
 do $$ begin begin insert into public.sunday_service_presence values ('89999999-9999-4999-8999-999999999999', '85555555-5555-4555-8555-555555555555'); raise exception 'bad event accepted'; exception when foreign_key_violation then null; end; end $$;
@@ -93,7 +93,7 @@ select pass('presence requires a valid Member');
 
 insert into public.visitors (id, first_name, last_name, email) values ('89999999-9999-4999-8999-999999999991', 'Sunday', 'Visitor', 'sunday-visitor@example.test');
 insert into public.sunday_service_visitor_registrations (event_id, visitor_id, registered_by_profile_id) values ('88888888-8888-4888-8888-888888888883', '89999999-9999-4999-8999-999999999991', '82222222-2222-4222-8222-222222222222');
-select is((select count(*) from public.sunday_service_visitor_registrations), 1::bigint, 'valid Sunday Visitor registration can be recorded');
+select is((select count(*) from public.sunday_service_visitor_registrations where event_id = '88888888-8888-4888-8888-888888888883' and visitor_id = '89999999-9999-4999-8999-999999999991'), 1::bigint, 'valid Sunday Visitor registration can be recorded');
 do $$ begin begin insert into public.sunday_service_visitor_registrations values ('88888888-8888-4888-8888-888888888883', '89999999-9999-4999-8999-999999999991', '82222222-2222-4222-8222-222222222222', now()); raise exception 'duplicate visitor accepted'; exception when unique_violation then null; end; end $$;
 select pass('duplicate Visitor registration is rejected');
 do $$ begin begin insert into public.sunday_service_visitor_registrations (event_id, visitor_id, registered_by_profile_id) values ('88888888-8888-4888-8888-888888888883', '89999999-9999-4999-8999-999999999999', '82222222-2222-4222-8222-222222222222'); raise exception 'bad visitor accepted'; exception when foreign_key_violation then null; end; end $$;

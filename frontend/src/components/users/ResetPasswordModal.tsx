@@ -71,7 +71,7 @@ export function ResetPasswordModal({
       onClose={onClose}
       preventClose={isSaving}
       title={`Reset password for ${user.name}`}
-      description="Set a new password and share it with the person securely. Their current password stops working immediately."
+      description="Set a new password and share it with the person securely. Their current password stops working immediately and they are signed out on every device. They must choose a new password the next time they sign in."
     >
       {formError && (
         <FeedbackBanner className="mb-5" tone="error">

@@ -65,7 +65,8 @@ export function UserFormModal({
     const errors: FieldErrors = {}
 
     if (!normalizedName) errors.name = 'Enter a name.'
-    if (!EMAIL_PATTERN.test(normalizedEmail)) errors.email = 'Enter a valid email address.'
+    // Your own sign-in email is read-only here, so it is not re-validated.
+    if (!isOwnAccount && !EMAIL_PATTERN.test(normalizedEmail)) errors.email = 'Enter a valid email address.'
     if (!isEditing && !isStrongUserPassword(password)) {
       errors.password = `Use ${USER_PASSWORD_HINT}`
     }
@@ -132,16 +133,30 @@ export function UserFormModal({
             onChange={(event) => setName(event.target.value)}
           />
         </FormField>
-        <FormField id="user-email" label="Email" required error={fieldErrors.email}>
+        <FormField
+          id="user-email"
+          label="Email"
+          required
+          description={
+            isOwnAccount
+              ? 'Ask another Admin to change your sign-in email. Change your password from My profile.'
+              : undefined
+          }
+          error={fieldErrors.email}
+        >
           <TextInput
             id="user-email"
             type="email"
             value={email}
             maxLength={254}
             autoComplete="off"
-            disabled={isSaving}
+            readOnly={isOwnAccount}
+            disabled={isSaving || isOwnAccount}
             hasError={Boolean(fieldErrors.email)}
-            aria-describedby={describedBy('email')}
+            aria-describedby={describedBy(
+              'email',
+              isOwnAccount ? 'user-email-description' : undefined,
+            )}
             aria-invalid={Boolean(fieldErrors.email)}
             onChange={(event) => setEmail(event.target.value)}
           />
@@ -190,12 +205,18 @@ export function UserFormModal({
                 autoComplete="new-password"
                 disabled={isSaving}
                 hasError={Boolean(fieldErrors.password)}
-                aria-describedby={describedBy('password', 'user-password-description')}
+                aria-describedby={describedBy(
+                  'password',
+                  'user-password-description user-password-first-sign-in',
+                )}
                 aria-invalid={Boolean(fieldErrors.password)}
                 onChange={(event) => setPassword(event.target.value)}
               />
               <CopyPasswordButton value={password} disabled={isSaving} />
             </div>
+            <p id="user-password-first-sign-in" className="mt-2 text-sm text-muted">
+              They will be asked to choose their own password the first time they sign in.
+            </p>
           </FormField>
         )}
         <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">

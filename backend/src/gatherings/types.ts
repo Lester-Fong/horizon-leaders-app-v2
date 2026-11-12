@@ -1,4 +1,5 @@
 import type { HorizonActor } from "../auth/types.js";
+import type { PageMeta, PageRequest } from "../http/pagination.js";
 
 export interface GatheringLifeGroup {
   id: string;
@@ -138,7 +139,14 @@ export interface GatheringService {
     lifeGroupId: string,
     gatheringId: string,
   ): Promise<GatheringAttendanceRoster>;
+  /** The Life Group with every Gathering, read in batches past the row cap. */
   list(actor: HorizonActor, lifeGroupId: string): Promise<GatheringDirectory>;
+  /** The Life Group with one page of its Gatherings, with the exact total. */
+  listPage(
+    actor: HorizonActor,
+    lifeGroupId: string,
+    page: PageRequest,
+  ): Promise<{ directory: GatheringDirectory; meta: PageMeta }>;
   removeAttendance(
     actor: HorizonActor,
     lifeGroupId: string,

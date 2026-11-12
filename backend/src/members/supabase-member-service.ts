@@ -19,6 +19,12 @@ import {
   MEMBER_QR_TOKEN_COLLISION_RETRIES,
 } from "./member-qr-token.js";
 import { CHURCH_TIME_ZONE } from "../config/constants.js";
+import {
+  fetchAllRows,
+  fetchRowPage,
+  type CountOptions,
+} from "../db/range-queries.js";
+import { buildPageMeta, pageFromArray } from "../http/pagination.js";
 
 interface SupabaseMemberServiceConfig {
   fetchImpl?: typeof globalThis.fetch;
@@ -230,32 +236,58 @@ export function createSupabaseMemberService({
     ].some((value) => value?.toLocaleLowerCase().includes(needle));
   }
 
-  async function listRows(
+  /**
+   * Builds the scoped, deterministically ordered Member query. Returns undefined
+   * when a Leader has no Life Group, so that Leader sees no Members.
+   */
+  async function createListQueryFactory(
     actor: HorizonActor,
     options: ListMembersOptions,
   ) {
-    let query = supabase
-      .from("members")
-      .select(MEMBER_COLUMNS)
-      .order("last_name")
-      .order("first_name");
+    const leaderLifeGroupId =
+      actor.role === "leader" ? await getLeaderLifeGroupId(actor) : undefined;
+    if (actor.role === "leader" && !leaderLifeGroupId) return undefined;
 
-    if (actor.role === "leader") {
-      const lifeGroupId = await getLeaderLifeGroupId(actor);
-      if (!lifeGroupId) return [];
-      query = query.eq("life_group_id", lifeGroupId).eq("is_active", true);
-    } else {
-      if (options.lifeGroupId) {
-        query = query.eq("life_group_id", options.lifeGroupId);
-      }
-      if (options.status !== "all") {
-        query = query.eq("is_active", options.status === "active");
-      }
-    }
+    return (countOptions?: CountOptions) => {
+      let query = supabase
+        .from("members")
+        .select(MEMBER_COLUMNS, countOptions)
+        .order("last_name")
+        .order("first_name")
+        .order("id");
 
-    const { data, error } = await query;
+      if (leaderLifeGroupId) {
+        query = query.eq("life_group_id", leaderLifeGroupId).eq("is_active", true);
+      } else {
+        if (options.lifeGroupId) {
+          query = query.eq("life_group_id", options.lifeGroupId);
+        }
+        if (options.status !== "all") {
+          query = query.eq("is_active", options.status === "active");
+        }
+      }
+
+      if (options.gender === "not_set") {
+        query = query.is("gender", null);
+      } else if (options.gender) {
+        query = query.eq("gender", options.gender);
+      }
+      return query;
+    };
+  }
+
+  /** Search and age are evaluated in memory against hydrated Members. */
+  function matchesMemoryFilters(member: Member, options: ListMembersOptions) {
+    return matchesSearch(member, options.search) && matchesAge(member.birthDate, options.age);
+  }
+
+  async function listAll(actor: HorizonActor, options: ListMembersOptions) {
+    const buildQuery = await createListQueryFactory(actor, options);
+    if (!buildQuery) return [];
+    const { data, error } = await fetchAllRows(() => buildQuery());
     if (error) throw serviceUnavailable();
-    return data;
+    const members = await hydrateMembers(data);
+    return members.filter((member) => matchesMemoryFilters(member, options));
   }
 
   async function hydrateMembers(rows: MemberRow[]) {
@@ -302,18 +334,18 @@ export function createSupabaseMemberService({
   }
 
   return {
-    async list(actor, options) {
-      const rows = await listRows(actor, options);
-      const members = await hydrateMembers(rows);
-      return members.filter(
-        (member) =>
-          matchesSearch(member, options.search) &&
-          (!options.gender ||
-            (options.gender === "not_set"
-              ? member.gender === null
-              : member.gender === options.gender)) &&
-          matchesAge(member.birthDate, options.age),
-      );
+    list: listAll,
+
+    async listPage(actor, options, page) {
+      if (options.search || options.age) {
+        return pageFromArray(await listAll(actor, options), page);
+      }
+      const buildQuery = await createListQueryFactory(actor, options);
+      if (!buildQuery) return { items: [], meta: buildPageMeta(page, 0, 0) };
+      const { data, error } = await fetchRowPage(buildQuery, page);
+      if (error) throw serviceUnavailable();
+      const items = await hydrateMembers(data.rows);
+      return { items, meta: buildPageMeta(page, data.total, items.length) };
     },
 
     async getById(actor, memberId) {

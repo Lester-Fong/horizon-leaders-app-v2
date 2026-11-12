@@ -7,12 +7,15 @@ export interface HorizonActor {
   isActive: true;
   name: string;
   role: AppRole;
+  /** True after an Admin sets the password; only password-change routes work until it is changed. */
+  mustChangePassword?: boolean;
 }
 
 export type AuthFailureCode =
   | "ACCOUNT_INACTIVE"
   | "AUTH_SERVICE_UNAVAILABLE"
   | "INVALID_TOKEN"
+  | "PASSWORD_CHANGE_REQUIRED"
   | "PROFILE_NOT_FOUND";
 
 export type AuthResult =

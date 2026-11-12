@@ -7,14 +7,17 @@ import {
   type GatheringService,
   type UpdateGatheringInput,
 } from "../gatherings/types.js";
+import { PagedData, readPageRequest } from "../http/pagination.js";
+import { createRequestHandler, sendError, sendInvalid } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readCalendarDate,
+  readOptionalText,
+  readUuid,
+} from "../http/validation.js";
 
-interface ApiErrorBody {
-  error: { code: string; message: string };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const GATHERING_FIELDS = new Set([
   "gatheringDate",
   "location",
@@ -22,70 +25,10 @@ const GATHERING_FIELDS = new Set([
   "title",
 ]);
 
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function hasUnknownFields(record: Record<string, unknown>) {
-  return Object.keys(record).some((key) => !GATHERING_FIELDS.has(key));
-}
-
-function readUuid(value: unknown) {
-  return typeof value === "string" && UUID_PATTERN.test(value)
-    ? value
-    : undefined;
-}
-
-function readDate(value: unknown) {
-  if (typeof value !== "string" || !DATE_PATTERN.test(value)) return undefined;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year!, month! - 1, day));
-  return date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month! - 1 &&
-    date.getUTCDate() === day
-    ? value
-    : undefined;
-}
-
-function readOptionalText(value: unknown) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return undefined;
-  return value.trim() || null;
-}
-
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    response.status(successStatus).json({ data: await operation() });
-  } catch (error) {
-    if (error instanceof GatheringServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-    sendError(
-      response,
-      500,
-      "GATHERING_SERVICE_UNAVAILABLE",
-      "Gathering data is temporarily unavailable.",
-    );
-  }
-}
+const handleRequest = createRequestHandler(GatheringServiceError, {
+  code: "GATHERING_SERVICE_UNAVAILABLE",
+  message: "Gathering data is temporarily unavailable.",
+});
 
 function readNestedIds(
   response: Response,
@@ -120,9 +63,19 @@ export function createGatheringsRouter(
     async (request, response) => {
       const ids = readNestedIds(response, request.params.lifeGroupId);
       if (!ids || !request.actor) return;
+      const pagination = readPageRequest(request.query);
+      if (!pagination.ok) {
+        sendInvalid(response, pagination.message);
+        return;
+      }
+      const { page } = pagination;
       response.set("Cache-Control", "private, no-store");
       await handleRequest(response, () =>
-        gatheringService.list(request.actor!, ids.lifeGroupId),
+        page
+          ? gatheringService
+              .listPage(request.actor!, ids.lifeGroupId, page)
+              .then(({ directory, meta }) => new PagedData(directory, meta))
+          : gatheringService.list(request.actor!, ids.lifeGroupId),
       );
     },
   );
@@ -138,7 +91,7 @@ export function createGatheringsRouter(
         }
         return;
       }
-      if (hasUnknownFields(request.body)) {
+      if (hasUnknownFields(request.body, GATHERING_FIELDS)) {
         sendError(
           response,
           400,
@@ -147,7 +100,7 @@ export function createGatheringsRouter(
         );
         return;
       }
-      const gatheringDate = readDate(request.body.gatheringDate);
+      const gatheringDate = readCalendarDate(request.body.gatheringDate);
       const title = readOptionalText(request.body.title);
       const location = readOptionalText(request.body.location);
       const notes = readOptionalText(request.body.notes);
@@ -209,7 +162,7 @@ export function createGatheringsRouter(
         }
         return;
       }
-      if (hasUnknownFields(request.body)) {
+      if (hasUnknownFields(request.body, GATHERING_FIELDS)) {
         sendError(
           response,
           400,
@@ -220,7 +173,7 @@ export function createGatheringsRouter(
       }
       const update: UpdateGatheringInput = {};
       if (hasOwn(request.body, "gatheringDate")) {
-        const gatheringDate = readDate(request.body.gatheringDate);
+        const gatheringDate = readCalendarDate(request.body.gatheringDate);
         if (!gatheringDate) {
           sendError(response, 400, "INVALID_REQUEST", "Gathering date must be valid.");
           return;

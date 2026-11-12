@@ -1,9 +1,11 @@
-import { RefreshCw } from 'lucide-react'
+import { KeyRound, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
+import { ChangePasswordForm } from '../components/users/ChangePasswordForm'
 import { UserProfileDetails } from '../components/users/UserProfileDetails'
 import { Button } from '../components/ui/Button'
 import { ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
+import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ApiError, getMyProfile, type ManagedUser } from '../lib/api'
 import { getAccessToken } from '../lib/session'
@@ -17,6 +19,9 @@ export function ProfilePage() {
   const [profile, setProfile] = useState<ManagedUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [isSavingPassword, setIsSavingPassword] = useState(false)
+  const [passwordNotice, setPasswordNotice] = useState<string | null>(null)
 
   const loadProfile = useCallback(async () => {
     setIsLoading(true)
@@ -56,17 +61,47 @@ export function ProfilePage() {
         title="My profile"
         description="Your Horizon staff account details."
         actions={
-          <Button variant="secondary" onClick={() => void loadProfile()} isLoading={isLoading}>
-            <RefreshCw aria-hidden="true" className="size-4" />
-            Refresh
-          </Button>
+          <>
+            <Button variant="secondary" onClick={() => void loadProfile()} isLoading={isLoading}>
+              <RefreshCw aria-hidden="true" className="size-4" />
+              Refresh
+            </Button>
+            <Button
+              onClick={() => {
+                setPasswordNotice(null)
+                setIsChangingPassword(true)
+              }}
+            >
+              <KeyRound aria-hidden="true" className="size-4" />
+              Change password
+            </Button>
+          </>
         }
       />
+      {passwordNotice && <FeedbackBanner tone="success">{passwordNotice}</FeedbackBanner>}
       {loadError && <FeedbackBanner tone="error">{loadError}</FeedbackBanner>}
       <UserProfileDetails user={profile} />
       <FeedbackBanner tone="info">
-        To change your name, email, role, or password, ask a Horizon Admin.
+        To change your name, email, or role, ask a Horizon Admin.
       </FeedbackBanner>
+      <Modal
+        className="max-w-md"
+        isOpen={isChangingPassword}
+        onClose={() => setIsChangingPassword(false)}
+        preventClose={isSavingPassword}
+        title="Change your password"
+        description="You will stay signed in here. Every other device is signed out."
+      >
+        <ChangePasswordForm
+          autoFocus
+          onCancel={() => setIsChangingPassword(false)}
+          onBusyChange={setIsSavingPassword}
+          onChanged={() => {
+            setIsChangingPassword(false)
+            setPasswordNotice('Password changed. Other devices were signed out.')
+          }}
+        />
+      </Modal>
     </div>
   )
 }

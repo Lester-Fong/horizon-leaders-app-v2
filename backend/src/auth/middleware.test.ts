@@ -92,7 +92,7 @@ describe("authentication boundary", () => {
       .set("Authorization", `Bearer ${token}`);
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: actor });
+    expect(response.body).toEqual({ data: { ...actor, mustChangePassword: false } });
     expect(response.headers["cache-control"]).toBe("private, no-store");
   });
 
@@ -133,11 +133,52 @@ describe("authentication boundary", () => {
     expect(Object.keys(response.body.data).sort()).toEqual([
       "id",
       "isActive",
+      "mustChangePassword",
       "name",
       "role",
     ]);
+    expect(response.body.data.mustChangePassword).toBe(false);
     expect(response.body).not.toHaveProperty("accessToken");
     expect(response.body).not.toHaveProperty("userMetadata");
+  });
+
+  it("blocks protected routes until a temporary password is changed", async () => {
+    const pendingAuthService: AuthService = {
+      authenticate: vi.fn(async () => ({
+        actor: {
+          id: "11111111-1111-4111-8111-111111111111",
+          isActive: true as const,
+          mustChangePassword: true,
+          name: "Pending Leader",
+          role: "leader" as const,
+        },
+        ok: true as const,
+      })),
+    };
+    const app = express();
+    app.get("/blocked", requireAuth(pendingAuthService), (_request, response) => {
+      response.json({ ok: true });
+    });
+    app.get(
+      "/allowed",
+      requireAuth(pendingAuthService, { allowPendingPasswordChange: true }),
+      (_request, response) => {
+        response.json({ ok: true });
+      },
+    );
+
+    const blocked = await request(app).get("/blocked").set("Authorization", "Bearer token");
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe("PASSWORD_CHANGE_REQUIRED");
+
+    const allowed = await request(app).get("/allowed").set("Authorization", "Bearer token");
+    expect(allowed.status).toBe(200);
+
+    const me = await request(createApp({ authService: pendingAuthService }))
+      .get("/api/me")
+      .set("Authorization", "Bearer token");
+    expect(me.status).toBe(200);
+    expect(me.body.data.mustChangePassword).toBe(true);
   });
 });
 

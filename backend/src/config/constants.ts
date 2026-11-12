@@ -12,3 +12,12 @@ export const MAX_STORED_IMAGE_DIMENSION = 1600;
 /** Staff account password policy enforced by the Users API before Supabase Auth. */
 export const USER_PASSWORD_MIN_LENGTH = 10;
 export const USER_PASSWORD_MAX_LENGTH = 72;
+
+/** Per-actor request limits for sensitive account routes (in-memory, per API process). */
+export const USER_MUTATION_RATE_LIMIT_MAX = 30;
+export const USER_MUTATION_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+export const OWN_PASSWORD_CHANGE_RATE_LIMIT_MAX = 5;
+export const OWN_PASSWORD_CHANGE_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Most recent account activity entries returned for one user. */
+export const USER_ACTIVITY_LIMIT = 50;

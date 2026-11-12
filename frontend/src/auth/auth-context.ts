@@ -15,8 +15,13 @@ export interface AuthActionResult {
   ok: boolean
 }
 
+export interface LoginOptions {
+  /** Replaces the sign-in failure message and clears the stale local session. */
+  failureMessage?: string
+}
+
 export interface AuthContextValue extends AuthState {
-  login(email: string, password: string): Promise<AuthActionResult>
+  login(email: string, password: string, options?: LoginOptions): Promise<AuthActionResult>
   logout(): Promise<void>
 }
 

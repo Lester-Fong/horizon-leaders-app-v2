@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(7);
+select plan(15);
 
 select has_function(
   'public',
@@ -55,6 +55,64 @@ select is(
   public.profile_has_references('a9999999-9999-4999-8999-999999999999'),
   false,
   'an unknown Profile has no references'
+);
+
+select has_function(
+  'public',
+  'revoke_user_sessions',
+  array['uuid'],
+  'revoke_user_sessions exists'
+);
+
+select ok(
+  not has_function_privilege('anon', 'public.revoke_user_sessions(uuid)', 'execute')
+  and not has_function_privilege('authenticated', 'public.revoke_user_sessions(uuid)', 'execute')
+  and has_function_privilege('service_role', 'public.revoke_user_sessions(uuid)', 'execute'),
+  'only service_role can execute revoke_user_sessions'
+);
+
+insert into auth.sessions (id, user_id) values
+  ('b1111111-1111-4111-8111-111111111111', 'a1111111-1111-4111-8111-111111111111'),
+  ('b2222222-2222-4222-8222-222222222222', 'a1111111-1111-4111-8111-111111111111'),
+  ('b3333333-3333-4333-8333-333333333333', 'a2222222-2222-4222-8222-222222222222');
+
+select is(
+  public.revoke_user_sessions('a1111111-1111-4111-8111-111111111111'),
+  2,
+  'revoke_user_sessions removes every session of the target user'
+);
+
+select is(
+  (select count(*)::integer from auth.sessions where user_id = 'a2222222-2222-4222-8222-222222222222'),
+  1,
+  'revoke_user_sessions leaves other users signed in'
+);
+
+select ok(
+  (select relrowsecurity from pg_class where oid = 'public.user_audit_events'::regclass),
+  'user_audit_events has RLS enabled'
+);
+
+select ok(
+  not has_table_privilege('anon', 'public.user_audit_events', 'select')
+  and not has_table_privilege('authenticated', 'public.user_audit_events', 'select')
+  and not has_table_privilege('authenticated', 'public.user_audit_events', 'insert'),
+  'browser roles cannot read or write user_audit_events'
+);
+
+select ok(
+  has_table_privilege('service_role', 'public.user_audit_events', 'insert')
+  and not has_table_privilege('service_role', 'public.user_audit_events', 'update')
+  and not has_table_privilege('service_role', 'public.user_audit_events', 'delete'),
+  'user_audit_events is append-only for service_role'
+);
+
+select throws_ok(
+  $$insert into public.user_audit_events (action, actor_profile_id, actor_name, target_user_id, target_name)
+    values ('made_up_action', gen_random_uuid(), 'Admin', gen_random_uuid(), 'Target')$$,
+  '23514',
+  null,
+  'user_audit_events rejects unknown actions'
 );
 
 select * from finish();

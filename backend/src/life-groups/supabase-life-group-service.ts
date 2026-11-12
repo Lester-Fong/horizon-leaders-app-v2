@@ -345,19 +345,26 @@ export function createSupabaseLifeGroupService({
     },
 
     async update(lifeGroupId, input) {
-      await getLifeGroupRow(lifeGroupId);
+      const current = await getLifeGroupRow(lifeGroupId);
 
-      if (input.leaderProfileId) {
-        await validateLeader(input.leaderProfileId, lifeGroupId);
+      // The edit form always resubmits the current Leader. DEC-073 lets that Leader be
+      // deactivated or promoted while assigned, so only a real reassignment is validated.
+      const newLeaderProfileId =
+        input.leaderProfileId !== current.leader_profile_id
+          ? input.leaderProfileId
+          : undefined;
+
+      if (newLeaderProfileId !== undefined) {
+        await validateLeader(newLeaderProfileId, lifeGroupId);
       }
 
       const update: TablesUpdate<"life_groups"> = {};
 
       if (input.name !== undefined) update.name = input.name;
       if (input.description !== undefined) update.description = input.description;
-      if (input.leaderProfileId !== undefined) {
-        update.leader_profile_id = input.leaderProfileId;
-      }
+      if (newLeaderProfileId !== undefined) update.leader_profile_id = newLeaderProfileId;
+
+      if (Object.keys(update).length === 0) return hydrateSingle(current);
 
       const { data, error } = await supabase
         .from("life_groups")

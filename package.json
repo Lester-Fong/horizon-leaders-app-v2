@@ -16,7 +16,7 @@
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
     "supabase:test": "supabase test db",
-    "supabase:types": "supabase gen types typescript --local --schema public > backend/src/types/database.types.ts"
+    "supabase:types": "supabase gen types typescript --local --schema public > backend/src/types/database.types.ts && node -e \"const fs=require('fs');const f='backend/src/types/database.types.ts';fs.writeFileSync(f,fs.readFileSync(f,'utf8').trimEnd()+'\\n')\""
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

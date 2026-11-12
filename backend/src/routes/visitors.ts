@@ -1,7 +1,12 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 
 import { requireAuth } from "../auth/middleware.js";
-import type { AuthService } from "../auth/types.js";
+import type { AuthService, HorizonActor } from "../auth/types.js";
+import {
+  PagedData,
+  readPageRequest,
+  type PageRequest,
+} from "../http/pagination.js";
 import { toMemberSummary } from "../members/member-projection.js";
 import {
   VisitorServiceError,
@@ -11,53 +16,24 @@ import {
   type VisitorListStatus,
   type VisitorService,
 } from "../visitors/types.js";
+import { createRequestHandler, sendError, sendInvalid } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readOptionalText,
+  readRequiredText,
+  readUuid,
+} from "../http/validation.js";
 
-interface ApiErrorBody {
-  error: { code: string; message: string };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VISITOR_FIELDS = new Set(["email", "firstName", "lastName", "phone"]);
 const CONVERSION_FIELDS = new Set(["lifeGroupId"]);
 const LIFE_GROUP_FIELDS = new Set(["lifeGroupId"]);
 
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function hasUnknownFields(record: Record<string, unknown>, allowed: Set<string>) {
-  return Object.keys(record).some((key) => !allowed.has(key));
-}
-
-function readRequiredName(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function readOptionalText(value: unknown) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return undefined;
-  return value.trim() || null;
-}
-
-function readUuid(value: unknown) {
-  return typeof value === "string" && UUID_PATTERN.test(value)
-    ? value
-    : undefined;
-}
+const handleRequest = createRequestHandler(VisitorServiceError, {
+  code: "VISITOR_SERVICE_UNAVAILABLE",
+  message: "Visitor data is temporarily unavailable.",
+});
 
 function readStatus(value: unknown): VisitorListStatus | undefined {
   return value === "active" || value === "converted" || value === "all"
@@ -66,8 +42,8 @@ function readStatus(value: unknown): VisitorListStatus | undefined {
 }
 
 function readCreateInput(body: Record<string, unknown>): VisitorInput | undefined {
-  const firstName = readRequiredName(body.firstName);
-  const lastName = readRequiredName(body.lastName);
+  const firstName = readRequiredText(body.firstName);
+  const lastName = readRequiredText(body.lastName);
   const phone = readOptionalText(body.phone);
   const email = readOptionalText(body.email);
   if (!firstName || !lastName || phone === undefined || email === undefined) {
@@ -79,12 +55,12 @@ function readCreateInput(body: Record<string, unknown>): VisitorInput | undefine
 function readUpdateInput(body: Record<string, unknown>) {
   const update: UpdateVisitorInput = {};
   if (hasOwn(body, "firstName")) {
-    const firstName = readRequiredName(body.firstName);
+    const firstName = readRequiredText(body.firstName);
     if (!firstName) return undefined;
     update.firstName = firstName;
   }
   if (hasOwn(body, "lastName")) {
-    const lastName = readRequiredName(body.lastName);
+    const lastName = readRequiredText(body.lastName);
     if (!lastName) return undefined;
     update.lastName = lastName;
   }
@@ -101,27 +77,6 @@ function readUpdateInput(body: Record<string, unknown>) {
   return update;
 }
 
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    response.status(successStatus).json({ data: await operation() });
-  } catch (error) {
-    if (error instanceof VisitorServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-    sendError(
-      response,
-      500,
-      "VISITOR_SERVICE_UNAVAILABLE",
-      "Visitor data is temporarily unavailable.",
-    );
-  }
-}
-
 export function createVisitorsRouter(
   authService: AuthService,
   visitorService: VisitorService,
@@ -129,8 +84,24 @@ export function createVisitorsRouter(
   const router = Router();
   const authenticated = requireAuth(authService);
 
+  function listVisitors(
+    actor: HorizonActor,
+    options: ListVisitorsOptions,
+    page: PageRequest | undefined,
+  ) {
+    if (!page) return visitorService.list(actor, options);
+    return visitorService
+      .listPage(actor, options, page)
+      .then(({ items, meta }) => new PagedData(items, meta));
+  }
+
   router.get("/visitors", authenticated, async (request, response) => {
     if (!request.actor) return;
+    const pagination = readPageRequest(request.query);
+    if (!pagination.ok) {
+      sendInvalid(response, pagination.message);
+      return;
+    }
     const searchValue = request.query.search;
     if (searchValue !== undefined && typeof searchValue !== "string") {
       sendError(response, 400, "INVALID_REQUEST", "Search must be text.");
@@ -144,7 +115,7 @@ export function createVisitorsRouter(
       };
       response.set("Cache-Control", "private, no-store");
       await handleRequest(response, () =>
-        visitorService.list(request.actor!, options),
+        listVisitors(request.actor!, options, pagination.page),
       );
       return;
     }
@@ -165,7 +136,7 @@ export function createVisitorsRouter(
     };
     response.set("Cache-Control", "private, no-store");
     await handleRequest(response, () =>
-      visitorService.list(request.actor!, options),
+      listVisitors(request.actor!, options, pagination.page),
     );
   });
 

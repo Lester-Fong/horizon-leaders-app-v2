@@ -17,6 +17,7 @@ import {
   AuthContext,
   type AuthActionResult,
   type AuthState,
+  type LoginOptions,
 } from './auth-context'
 
 interface SessionResolution {
@@ -76,7 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return sessionResolution.current.promise
       }
 
-      setAuthState({ actor: null, message: null, status: 'initializing' })
+      // Keep an already signed-in tree mounted while a new session is checked.
+      setAuthState((current) =>
+        current.status === 'authenticated'
+          ? current
+          : { actor: null, message: null, status: 'initializing' },
+      )
 
       const promise = getCurrentActor(session.access_token)
         .then((actor) => {
@@ -143,8 +149,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearRejectedSession, resolveSession])
 
   const login = useCallback(
-    async (email: string, password: string): Promise<AuthActionResult> => {
+    async (
+      email: string,
+      password: string,
+      options: LoginOptions = {},
+    ): Promise<AuthActionResult> => {
       signedOutMessage.current = undefined
+
+      const failSignIn = (fallbackMessage: string): AuthActionResult => {
+        if (options.failureMessage) {
+          clearRejectedSession(options.failureMessage)
+          return { message: options.failureMessage, ok: false }
+        }
+        setAuthState({ actor: null, message: fallbackMessage, status: 'unauthenticated' })
+        return { message: fallbackMessage, ok: false }
+      }
+
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
@@ -152,22 +172,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
 
         if (error || !data.session) {
-          const message =
+          return failSignIn(
             error?.code === 'invalid_credentials'
               ? 'Email or password is incorrect.'
-              : 'Sign in is unavailable right now. Please try again.'
-          setAuthState({ actor: null, message, status: 'unauthenticated' })
-          return { message, ok: false }
+              : 'Sign in is unavailable right now. Please try again.',
+          )
         }
 
         return resolveSession(data.session)
       } catch {
-        const message = 'Sign in is unavailable right now. Please try again.'
-        setAuthState({ actor: null, message, status: 'unauthenticated' })
-        return { message, ok: false }
+        return failSignIn('Sign in is unavailable right now. Please try again.')
       }
     },
-    [resolveSession],
+    [clearRejectedSession, resolveSession],
   )
 
   const logout = useCallback(async () => {

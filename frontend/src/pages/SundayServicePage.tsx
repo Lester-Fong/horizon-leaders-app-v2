@@ -13,10 +13,11 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, checkInSundayAttendanceByQr, createAndRegisterSundayVisitor, getEventImage, getSundayAttendance, getSundayService, getSundayVisitors, getVisitors, markSundayAttendance, registerSundayVisitor, removeEventImage, removeSundayAttendance, removeSundayVisitor, uploadEventImage, type SundayAttendanceMember, type SundayService, type SundayVisitorRegistration, type Visitor } from '../lib/api'
+import { formatCalendarDateLong } from '../lib/dates'
 import { getAccessToken as token } from '../lib/session'
 
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Sunday Service data is unavailable right now.' }
-function formatDate(value: string) { return new Intl.DateTimeFormat('en-PH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) }
+const formatDate = formatCalendarDateLong
 function memberName(member: SundayAttendanceMember) { return `${member.firstName} ${member.lastName}` }
 function visitorName(registration: SundayVisitorRegistration) { return `${registration.visitor.firstName} ${registration.visitor.lastName}` }
 

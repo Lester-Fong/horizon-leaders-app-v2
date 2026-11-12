@@ -4,10 +4,9 @@ import multer from "multer";
 import { requireAuth } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
 import { MAX_UPLOAD_INPUT_BYTES } from "../config/constants.js";
+import { createRequestHandler, sendError } from "../http/responses.js";
+import { readUuid } from "../http/validation.js";
 import { UploadServiceError, type UploadService } from "../uploads/types.js";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const parseImage = multer({
   limits: {
@@ -19,9 +18,10 @@ const parseImage = multer({
   storage: multer.memoryStorage(),
 }).single("image");
 
-function sendError(response: Response, status: number, code: string, message: string) {
-  response.status(status).json({ error: { code, message } });
-}
+const handle = createRequestHandler(UploadServiceError, {
+  code: "UPLOAD_SERVICE_UNAVAILABLE",
+  message: "Image storage is temporarily unavailable.",
+});
 
 function requireImage(
   request: Request,
@@ -55,29 +55,9 @@ function requireImage(
 }
 
 function readId(response: Response, value: unknown, label: string) {
-  if (typeof value === "string" && UUID_PATTERN.test(value)) return value;
-  sendError(response, 400, "INVALID_REQUEST", `${label} ID must be a valid UUID.`);
-  return undefined;
-}
-
-async function handle(
-  response: Response,
-  operation: () => Promise<unknown>,
-) {
-  try {
-    response.json({ data: await operation() });
-  } catch (error) {
-    if (error instanceof UploadServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-    sendError(
-      response,
-      500,
-      "UPLOAD_SERVICE_UNAVAILABLE",
-      "Image storage is temporarily unavailable.",
-    );
-  }
+  const id = readUuid(value);
+  if (!id) sendError(response, 400, "INVALID_REQUEST", `${label} ID must be a valid UUID.`);
+  return id;
 }
 
 export function createUploadsRouter(

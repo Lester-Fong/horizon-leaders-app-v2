@@ -75,6 +75,7 @@ export function createSupabaseAuthService({
         actor: {
           id: profile.id,
           isActive: true,
+          mustChangePassword: user.app_metadata?.must_change_password === true,
           name: profile.name,
           role: profile.role,
         },

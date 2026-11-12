@@ -23,6 +23,7 @@ import {
   LoadingState,
 } from '../components/ui/Feedback'
 import { FormField, TextInput } from '../components/ui/FormControls'
+import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -33,7 +34,7 @@ import {
   createGathering,
   getGathering,
   getGatheringAttendance,
-  getGatherings,
+  getGatheringsPage,
   markGatheringAttendance,
   markGatheringVisitorAttendance,
   removeGatheringAttendance,
@@ -45,20 +46,16 @@ import {
   type GatheringLifeGroup,
   type LifeGroupGathering,
 } from '../lib/api'
+import { formatCalendarDate } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
+import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
   return 'Gathering data is unavailable right now. Please try again.'
 }
 
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat('en-PH', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(`${date}T00:00:00`))
-}
+const formatDate = formatCalendarDate
 
 function gatheringName(gathering: LifeGroupGathering) {
   return gathering.title ?? `Gathering on ${formatDate(gathering.gatheringDate)}`
@@ -87,7 +84,13 @@ export function GatheringsPage() {
   const { lifeGroupId } = useParams()
   const navigate = useNavigate()
   const [lifeGroup, setLifeGroup] = useState<GatheringLifeGroup | null>(null)
-  const [gatherings, setGatherings] = useState<LifeGroupGathering[]>([])
+  const gatheringList = usePagedList<LifeGroupGathering>(errorMessage)
+  const {
+    items: gatherings,
+    loadMore,
+    replace: replaceGatherings,
+    updateItems: updateGatherings,
+  } = gatheringList
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -109,15 +112,22 @@ export function GatheringsPage() {
     setLoadError(null)
     try {
       const token = await getAccessToken()
-      const directory = await getGatherings(token, lifeGroupId)
+      const directory = await getGatheringsPage(token, lifeGroupId, DIRECTORY_FIRST_PAGE)
       setLifeGroup(directory.lifeGroup)
-      setGatherings(directory.gatherings)
+      replaceGatherings(directory)
     } catch (error) {
       setLoadError(errorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [lifeGroupId])
+  }, [lifeGroupId, replaceGatherings])
+
+  const loadMoreGatherings = useCallback(() => {
+    if (!lifeGroupId) return
+    void loadMore(async (page) =>
+      getGatheringsPage(await getAccessToken(), lifeGroupId, page),
+    )
+  }, [lifeGroupId, loadMore])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDirectory(), 0)
@@ -207,7 +217,7 @@ export function GatheringsPage() {
             : currentPerson,
         ),
       )
-      setGatherings((current) =>
+      updateGatherings((current) =>
         current.map((gathering) =>
           gathering.id === attendanceTarget.id
             ? {
@@ -353,7 +363,7 @@ export function GatheringsPage() {
             </h2>
           </div>
           <p className="font-mono text-xs text-muted" aria-live="polite">
-            {gatherings.length} {gatherings.length === 1 ? 'record' : 'records'}
+            {gatheringList.total} {gatheringList.total === 1 ? 'record' : 'records'}
           </p>
         </div>
 
@@ -418,6 +428,18 @@ export function GatheringsPage() {
               ))}
             </tbody>
           </ResponsiveTable>
+        )}
+
+        {gatherings.length > 0 && (
+          <LoadMoreFooter
+            error={gatheringList.loadMoreError}
+            hasMore={gatheringList.hasMore}
+            isLoading={gatheringList.isLoadingMore}
+            label="Gatherings"
+            onLoadMore={loadMoreGatherings}
+            shown={gatherings.length}
+            total={gatheringList.total}
+          />
         )}
       </section>
 

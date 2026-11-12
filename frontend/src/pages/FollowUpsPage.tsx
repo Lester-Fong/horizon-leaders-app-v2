@@ -15,6 +15,7 @@ import {
   LoadingState,
 } from '../components/ui/Feedback'
 import { FormField, TextArea } from '../components/ui/FormControls'
+import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -26,17 +27,13 @@ import { StatusBadge } from '../components/ui/StatusBadge'
 import {
   ApiError,
   completeFollowUp,
-  getFollowUps,
+  getFollowUpsPage,
   type FollowUp,
   type FollowUpStatus,
 } from '../lib/api'
+import { formatTimestampDateTime } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
-
-const dateFormatter = new Intl.DateTimeFormat('en-PH', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-  timeZone: 'Asia/Manila',
-})
+import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 
 function getErrorMessage(error: unknown) {
   return error instanceof ApiError
@@ -45,7 +42,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function formatDate(value: string | null) {
-  return value ? dateFormatter.format(new Date(value)) : 'Not completed'
+  return value ? formatTimestampDateTime(value) : 'Not completed'
 }
 
 function readNumber(context: Record<string, unknown>, key: string) {
@@ -100,7 +97,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 export function FollowUpsPage() {
   const [status, setStatus] = useState<FollowUpStatus>('active')
-  const [followUps, setFollowUps] = useState<FollowUp[]>([])
+  const followUpList = usePagedList<FollowUp>(getErrorMessage)
+  const { items: followUps, loadMore, replace: replaceFollowUps } = followUpList
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -111,17 +109,28 @@ export function FollowUpsPage() {
   const [completionNoteError, setCompletionNoteError] = useState<string | null>(null)
   const [isCompleting, setIsCompleting] = useState(false)
 
+  // Switching between Active and History reloads from the first page.
   const loadDirectory = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
     try {
-      setFollowUps(await getFollowUps(await getAccessToken(), status))
+      replaceFollowUps(
+        await getFollowUpsPage(await getAccessToken(), status, DIRECTORY_FIRST_PAGE),
+      )
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [status])
+  }, [replaceFollowUps, status])
+
+  const loadMoreFollowUps = useCallback(
+    () =>
+      loadMore(async (page) =>
+        getFollowUpsPage(await getAccessToken(), status, page),
+      ),
+    [loadMore, status],
+  )
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDirectory(), 0)
@@ -210,7 +219,7 @@ export function FollowUpsPage() {
           </div>
           {!isLoading && (
             <p className="font-mono text-xs text-muted" aria-live="polite">
-              {followUps.length} {status === 'active' ? 'active' : 'completed'} {followUps.length === 1 ? 'record' : 'records'}
+              {followUpList.total} {status === 'active' ? 'active' : 'completed'} {followUpList.total === 1 ? 'record' : 'records'}
             </p>
           )}
         </div>
@@ -298,6 +307,18 @@ export function FollowUpsPage() {
             ))}
           </tbody>
         </ResponsiveTable>
+      )}
+
+      {!isLoading && followUps.length > 0 && (
+        <LoadMoreFooter
+          error={followUpList.loadMoreError}
+          hasMore={followUpList.hasMore}
+          isLoading={followUpList.isLoadingMore}
+          label={status === 'active' ? 'active Follow Ups' : 'completed Follow Ups'}
+          onLoadMore={() => void loadMoreFollowUps()}
+          shown={followUps.length}
+          total={followUpList.total}
+        />
       )}
 
       <Modal

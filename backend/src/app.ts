@@ -153,6 +153,7 @@ const unavailableLifeGroupService: LifeGroupService = {
 const unavailableFollowUpService: FollowUpService = {
   complete: async () => unavailableFollowUp(),
   list: async () => unavailableFollowUp(),
+  listPage: async () => unavailableFollowUp(),
   triggerSundayAbsence: async () => unavailableFollowUp(),
 };
 
@@ -163,6 +164,7 @@ const unavailableGatheringService: GatheringService = {
   getAttendance: async () => unavailableGathering(),
   getById: async () => unavailableGathering(),
   list: async () => unavailableGathering(),
+  listPage: async () => unavailableGathering(),
   removeAttendance: async () => unavailableGathering(),
   removeVisitorAttendance: async () => unavailableGathering(),
   update: async () => unavailableGathering(),
@@ -185,6 +187,7 @@ const unavailableMemberService: MemberService = {
   create: async () => unavailableMember(),
   getById: async () => unavailableMember(),
   list: async () => unavailableMember(),
+  listPage: async () => unavailableMember(),
   update: async () => unavailableMember(),
 };
 
@@ -204,6 +207,7 @@ const unavailableVisitorService: VisitorService = {
   create: async () => unavailableVisitor(),
   getById: async () => unavailableVisitor(),
   list: async () => unavailableVisitor(),
+  listPage: async () => unavailableVisitor(),
   setLifeGroup: async () => unavailableVisitor(),
   update: async () => unavailableVisitor(),
 };
@@ -286,10 +290,12 @@ function unavailableVisitor(): never {
 }
 function unavailableOpenCell(): never { throw new OpenCellServiceError(500,"OPENCELL_SERVICE_UNAVAILABLE","OpenCell data is temporarily unavailable."); }
 const unavailableUserService: UserService = {
+  changeOwnPassword: async () => unavailableUser(),
   create: async () => unavailableUser(),
   delete: async () => unavailableUser(),
   getById: async () => unavailableUser(),
   list: async () => unavailableUser(),
+  listActivity: async () => unavailableUser(),
   resetPassword: async () => unavailableUser(),
   setActive: async () => unavailableUser(),
   update: async () => unavailableUser(),

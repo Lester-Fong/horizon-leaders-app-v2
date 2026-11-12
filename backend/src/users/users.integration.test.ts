@@ -127,13 +127,40 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
     expect(duplicate.status).toBe(409);
     expect(duplicate.body.error.code).toBe("EMAIL_ALREADY_REGISTERED");
 
-    const firstLogin = await signIn(email, initialPassword);
+    const temporaryLogin = await signIn(email, initialPassword);
+    expect(temporaryLogin.error).toBeNull();
+    const temporaryAuth = { Authorization: `Bearer ${temporaryLogin.token}` };
+    const me = await request(app).get("/api/me").set(temporaryAuth);
+    expect(me.status).toBe(200);
+    expect(me.body.data).toMatchObject({ mustChangePassword: true, role: "leader" });
+
+    // An Admin-set password only unlocks the password-change routes.
+    const gated = await request(app).get("/api/members").set(temporaryAuth);
+    expect(gated.status).toBe(403);
+    expect(gated.body.error.code).toBe("PASSWORD_CHANGE_REQUIRED");
+    expect((await request(app).get("/api/me/profile").set(temporaryAuth)).status).toBe(200);
+
+    const wrongCurrent = await request(app)
+      .put("/api/me/password")
+      .set(temporaryAuth)
+      .send({ currentPassword: "Wrong2Horizon", newPassword: "Personal3Horizon" });
+    expect(wrongCurrent.status).toBe(422);
+    expect(wrongCurrent.body.error.code).toBe("CURRENT_PASSWORD_INCORRECT");
+
+    const personalPassword = "Personal3Horizon";
+    const changedOwn = await request(app)
+      .put("/api/me/password")
+      .set(temporaryAuth)
+      .send({ currentPassword: initialPassword, newPassword: personalPassword });
+    expect(changedOwn.status).toBe(200);
+    expect((await request(app).get("/api/me").set(temporaryAuth)).status).toBe(401);
+
+    const firstLogin = await signIn(email, personalPassword);
     expect(firstLogin.error).toBeNull();
-    const me = await request(app)
+    const unlocked = await request(app)
       .get("/api/me")
       .set("Authorization", `Bearer ${firstLogin.token}`);
-    expect(me.status).toBe(200);
-    expect(me.body.data.role).toBe("leader");
+    expect(unlocked.body.data.mustChangePassword).toBe(false);
 
     const listed = await request(app).get(`/api/users?status=all&search=${email}`).set(auth);
     expect(listed.status).toBe(200);
@@ -146,15 +173,33 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
     expect(updated.status).toBe(200);
     expect(updated.body.data).toMatchObject({ name: "Renamed Leader", role: "admin" });
 
+    // A rejected email change leaves the Profile untouched.
+    const otherAdmin = await createAdminSession();
+    const { data: otherAuth } = await adminClient.auth.admin.getUserById(otherAdmin.id);
+    const conflicting = await request(app)
+      .patch(`/api/users/${userId}`)
+      .set(auth)
+      .send({ email: otherAuth.user?.email, name: "Should Roll Back" });
+    expect(conflicting.status).toBe(409);
+    expect(conflicting.body.error.code).toBe("EMAIL_ALREADY_REGISTERED");
+    const unchanged = await request(app).get(`/api/users/${userId}`).set(auth);
+    expect(unchanged.body.data).toMatchObject({ email, name: "Renamed Leader" });
+
     const deactivated = await request(app)
       .patch(`/api/users/${userId}/status`)
       .set(auth)
       .send({ isActive: false });
     expect(deactivated.status).toBe(200);
     expect(deactivated.body.data.isActive).toBe(false);
-    const blocked = await request(app)
+    // Deactivation signs the user out everywhere, so the old session cannot resume.
+    const revoked = await request(app)
       .get("/api/me")
       .set("Authorization", `Bearer ${firstLogin.token}`);
+    expect(revoked.status).toBe(401);
+    const inactiveLogin = await signIn(email, personalPassword);
+    const blocked = await request(app)
+      .get("/api/me")
+      .set("Authorization", `Bearer ${inactiveLogin.token}`);
     expect(blocked.status).toBe(403);
     expect(blocked.body.error.code).toBe("ACCOUNT_INACTIVE");
 
@@ -167,8 +212,33 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
       .set(auth)
       .send({ password: newPassword });
     expect(reset.status).toBe(200);
-    expect((await signIn(email, initialPassword)).error).not.toBeNull();
+    // A password reset signs out sessions created with the old password.
+    const afterReset = await request(app)
+      .get("/api/me")
+      .set("Authorization", `Bearer ${inactiveLogin.token}`);
+    expect(afterReset.status).toBe(401);
+    expect((await signIn(email, personalPassword)).error).not.toBeNull();
     expect((await signIn(email, newPassword)).error).toBeNull();
+    // The reset password is temporary again.
+    const { data: resetAuthUser } = await adminClient.auth.admin.getUserById(userId);
+    expect(resetAuthUser.user?.app_metadata.must_change_password).toBe(true);
+
+    const activity = await request(app).get(`/api/users/${userId}/activity`).set(auth);
+    expect(activity.status).toBe(200);
+    expect(activity.body.data.map((event: { action: string }) => event.action).sort()).toEqual([
+      "password_changed",
+      "password_reset",
+      "user_created",
+      "user_deactivated",
+      "user_updated",
+    ]);
+    const roleChange = activity.body.data.find(
+      (event: { action: string }) => event.action === "user_updated",
+    );
+    expect(roleChange).toMatchObject({
+      actorId: admin.id,
+      details: { changes: { role: { from: "leader", to: "admin" } } },
+    });
 
     const removed = await request(app).delete(`/api/users/${userId}`).set(auth);
     expect(removed.status).toBe(200);
@@ -228,9 +298,32 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
       .set(auth)
       .send({ isActive: false });
     const ownDelete = await request(app).delete(`/api/users/${admin.id}`).set(auth);
-    for (const response of [ownRole, ownStatus, ownDelete]) {
+    // Both skip re-authentication, so an Admin cannot use them on their own account.
+    const ownReset = await request(app)
+      .put(`/api/users/${admin.id}/password`)
+      .set(auth)
+      .send({ password: "Changed2Horizon" });
+    const ownEmail = await request(app)
+      .patch(`/api/users/${admin.id}`)
+      .set(auth)
+      .send({ email: uniqueEmail("self") });
+    for (const response of [ownRole, ownStatus, ownDelete, ownReset, ownEmail]) {
       expect(response.status).toBe(409);
       expect(response.body.error.code).toBe("CANNOT_MODIFY_OWN_ACCOUNT");
     }
+    expect(ownReset.body.error.message).toBe("Use My profile to change your own password.");
+    expect(ownEmail.body.error.message).toBe("Ask another Admin to change your sign-in email.");
+
+    // The Admin's session survived both rejections, and renaming yourself still works.
+    const { data: ownAuth } = await adminClient.auth.admin.getUserById(admin.id);
+    const ownRename = await request(app)
+      .patch(`/api/users/${admin.id}`)
+      .set(auth)
+      .send({ email: ownAuth.user?.email, name: "Renamed Admin" });
+    expect(ownRename.status).toBe(200);
+    expect(ownRename.body.data).toMatchObject({
+      email: ownAuth.user?.email,
+      name: "Renamed Admin",
+    });
   });
 });

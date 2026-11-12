@@ -23,6 +23,7 @@ import {
 } from '../components/members/MemberFormModal'
 import { MemberQrPanel } from '../components/members/MemberQrPanel'
 import { ImageAssetPanel } from '../components/uploads/ImageAssetPanel'
+import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Button } from '../components/ui/Button'
 import {
   EmptyState,
@@ -43,7 +44,7 @@ import {
   getLifeGroups,
   getMember,
   getMemberPhoto,
-  getMembers,
+  getMembersPage,
   updateMember,
   uploadMemberPhoto,
   removeMemberPhoto,
@@ -55,7 +56,9 @@ import {
   type MemberAgeFilter,
   type MemberGenderFilter,
 } from '../lib/api'
+import { formatCalendarDate } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
+import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -64,10 +67,7 @@ function getErrorMessage(error: unknown) {
 
 function formatBirthDate(birthDate: string | null) {
   if (!birthDate) return 'Not recorded'
-  return new Intl.DateTimeFormat('en-PH', {
-    dateStyle: 'medium',
-    timeZone: 'UTC',
-  }).format(new Date(`${birthDate}T00:00:00.000Z`))
+  return formatCalendarDate(birthDate)
 }
 
 function formatGender(gender: MemberSummary['gender']) {
@@ -88,7 +88,8 @@ export function MembersPage() {
   const { actor } = useAuth()
   const [searchParams] = useSearchParams()
   const isAdmin = actor?.role === 'admin'
-  const [members, setMembers] = useState<MemberSummary[]>([])
+  const memberList = usePagedList<MemberSummary>(getErrorMessage)
+  const { items: members, loadMore, replace: replaceMembers } = memberList
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -142,12 +143,9 @@ export function MembersPage() {
     ? activeLifeGroups.length > 0
     : Boolean(ownLifeGroup?.isActive)
 
-  const loadDirectory = useCallback(async () => {
-    setIsLoading(true)
-    setLoadError(null)
-    try {
-      const token = await getAccessToken()
-      const filters = isAdmin
+  const memberFilters = useMemo(
+    () =>
+      isAdmin
         ? {
             ...(lifeGroupFilter ? { lifeGroupId: lifeGroupFilter } : {}),
             ...(search ? { search } : {}),
@@ -155,19 +153,36 @@ export function MembersPage() {
             ...(genderFilter ? { gender: genderFilter } : {}),
             ...(ageFilter ? { age: ageFilter } : {}),
           }
-        : { ...(search ? { search } : {}) }
-      const [memberData, lifeGroupData] = await Promise.all([
-        getMembers(token, filters),
+        : { ...(search ? { search } : {}) },
+    [ageFilter, genderFilter, isAdmin, lifeGroupFilter, search, statusFilter],
+  )
+
+  // Changing search or filters reloads from the first page.
+  const loadDirectory = useCallback(async () => {
+    setIsLoading(true)
+    setLoadError(null)
+    try {
+      const token = await getAccessToken()
+      const [memberPage, lifeGroupData] = await Promise.all([
+        getMembersPage(token, memberFilters, DIRECTORY_FIRST_PAGE),
         getLifeGroups(token),
       ])
-      setMembers(memberData)
+      replaceMembers(memberPage)
       setLifeGroups(lifeGroupData)
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [ageFilter, genderFilter, isAdmin, lifeGroupFilter, search, statusFilter])
+  }, [memberFilters, replaceMembers])
+
+  const loadMoreMembers = useCallback(
+    () =>
+      loadMore(async (page) =>
+        getMembersPage(await getAccessToken(), memberFilters, page),
+      ),
+    [loadMore, memberFilters],
+  )
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => void loadDirectory(), 0)
@@ -330,7 +345,7 @@ export function MembersPage() {
           </div>
           {!isLoading && (
             <p className="font-mono text-xs text-muted" aria-live="polite">
-              {members.length} {members.length === 1 ? 'Member' : 'Members'}
+              {memberList.total} {memberList.total === 1 ? 'Member' : 'Members'}
             </p>
           )}
         </div>
@@ -498,6 +513,18 @@ export function MembersPage() {
             ))}
           </tbody>
         </ResponsiveTable>
+      )}
+
+      {!isLoading && members.length > 0 && (
+        <LoadMoreFooter
+          error={memberList.loadMoreError}
+          hasMore={memberList.hasMore}
+          isLoading={memberList.isLoadingMore}
+          label="Members"
+          onLoadMore={() => void loadMoreMembers()}
+          shown={members.length}
+          total={memberList.total}
+        />
       )}
 
       {formContext && actor && (

@@ -2,7 +2,22 @@ import { Router, type Response } from "express";
 
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import type { AppRole, AuthService } from "../auth/types.js";
+import {
+  OWN_PASSWORD_CHANGE_RATE_LIMIT_MAX,
+  OWN_PASSWORD_CHANGE_RATE_LIMIT_WINDOW_MS,
+  USER_MUTATION_RATE_LIMIT_MAX,
+  USER_MUTATION_RATE_LIMIT_WINDOW_MS,
+} from "../config/constants.js";
+import { PagedData, pageFromArray, readPageRequest } from "../http/pagination.js";
+import { createRequestHandler, sendError, sendInvalid } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readUuid,
+} from "../http/validation.js";
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from "../users/password-policy.js";
+import { createActorRateLimit } from "../users/rate-limit.js";
 import {
   UserServiceError,
   type UpdateUserInput,
@@ -10,15 +25,6 @@ import {
   type UserService,
 } from "../users/types.js";
 
-interface ApiErrorBody {
-  error: {
-    code: string;
-    message: string;
-  };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL_LENGTH = 254;
 const MAX_NAME_LENGTH = 120;
@@ -27,30 +33,10 @@ const CREATE_FIELDS = new Set(["email", "name", "password", "role"]);
 const UPDATE_FIELDS = new Set(["email", "name", "role"]);
 const STATUSES = new Set<UserListStatus>(["active", "all", "inactive"]);
 
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function sendInvalid(response: Response, message: string) {
-  return sendError(response, 400, "INVALID_REQUEST", message);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function hasUnknownFields(record: Record<string, unknown>, allowed: Set<string>) {
-  return Object.keys(record).some((key) => !allowed.has(key));
-}
+const handleRequest = createRequestHandler(UserServiceError, {
+  code: "USER_SERVICE_UNAVAILABLE",
+  message: "User data is temporarily unavailable.",
+});
 
 function readName(value: unknown) {
   if (typeof value !== "string") return undefined;
@@ -70,36 +56,8 @@ function readRole(value: unknown): AppRole | undefined {
   return value === "admin" || value === "leader" ? value : undefined;
 }
 
-function readUuid(value: unknown) {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) return undefined;
-  return value;
-}
-
 function sendWeakPassword(response: Response) {
   return sendError(response, 422, "WEAK_PASSWORD", PASSWORD_POLICY_MESSAGE);
-}
-
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    const data = await operation();
-    response.status(successStatus).json({ data });
-  } catch (error) {
-    if (error instanceof UserServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-
-    sendError(
-      response,
-      500,
-      "USER_SERVICE_UNAVAILABLE",
-      "User data is temporarily unavailable.",
-    );
-  }
 }
 
 export function createUsersRouter(
@@ -108,16 +66,61 @@ export function createUsersRouter(
 ) {
   const router = Router();
   const authenticated = requireAuth(authService);
+  const pendingPasswordAllowed = requireAuth(authService, { allowPendingPasswordChange: true });
   const adminOnly = [authenticated, requireRole("admin")];
+  const adminMutation = [
+    ...adminOnly,
+    createActorRateLimit({
+      max: USER_MUTATION_RATE_LIMIT_MAX,
+      windowMs: USER_MUTATION_RATE_LIMIT_WINDOW_MS,
+    }),
+  ];
+  const ownPasswordLimit = createActorRateLimit({
+    max: OWN_PASSWORD_CHANGE_RATE_LIMIT_MAX,
+    windowMs: OWN_PASSWORD_CHANGE_RATE_LIMIT_WINDOW_MS,
+  });
 
   // Any signed-in user may read their own profile; the id always comes from the verified actor.
-  router.get("/me/profile", authenticated, async (request, response) => {
+  router.get("/me/profile", pendingPasswordAllowed, async (request, response) => {
     response.set("Cache-Control", "private, no-store");
     await handleRequest(response, () => userService.getById(request.actor!.id));
   });
 
+  // Any signed-in user may change their own password, including a required first change.
+  router.put(
+    "/me/password",
+    pendingPasswordAllowed,
+    ownPasswordLimit,
+    async (request, response) => {
+      if (
+        !isRecord(request.body) ||
+        hasUnknownFields(request.body, new Set(["currentPassword", "newPassword"])) ||
+        typeof request.body.currentPassword !== "string" ||
+        request.body.currentPassword === ""
+      ) {
+        sendInvalid(response, "Provide only your current password and a new password.");
+        return;
+      }
+
+      if (!isStrongPassword(request.body.newPassword)) {
+        sendWeakPassword(response);
+        return;
+      }
+
+      const { currentPassword, newPassword } = request.body;
+      await handleRequest(response, () =>
+        userService.changeOwnPassword(request.actor!, currentPassword, newPassword),
+      );
+    },
+  );
+
   router.get("/users", ...adminOnly, async (request, response) => {
     const { search, status = "active" } = request.query;
+    const pagination = readPageRequest(request.query);
+    if (!pagination.ok) {
+      sendInvalid(response, pagination.message);
+      return;
+    }
 
     if (typeof status !== "string" || !STATUSES.has(status as UserListStatus)) {
       sendInvalid(response, "Status must be active, inactive, or all.");
@@ -132,13 +135,19 @@ export function createUsersRouter(
       return;
     }
 
+    const { page } = pagination;
     response.set("Cache-Control", "private, no-store");
-    await handleRequest(response, () =>
-      userService.list({
+    // Search matches Auth emails in memory, so the filtered list is paged in memory.
+    // Staff accounts are few, which keeps this cheap.
+    await handleRequest(response, async () => {
+      const users = await userService.list({
         search: search?.trim() || undefined,
         status: status as UserListStatus,
-      }),
-    );
+      });
+      if (!page) return users;
+      const { items, meta } = pageFromArray(users, page);
+      return new PagedData(items, meta);
+    });
   });
 
   router.get("/users/:userId", ...adminOnly, async (request, response) => {
@@ -152,7 +161,18 @@ export function createUsersRouter(
     await handleRequest(response, () => userService.getById(userId));
   });
 
-  router.post("/users", ...adminOnly, async (request, response) => {
+  router.get("/users/:userId/activity", ...adminOnly, async (request, response) => {
+    const userId = readUuid(request.params.userId);
+    if (!userId) {
+      sendInvalid(response, "User ID must be a valid UUID.");
+      return;
+    }
+
+    response.set("Cache-Control", "private, no-store");
+    await handleRequest(response, () => userService.listActivity(userId));
+  });
+
+  router.post("/users", ...adminMutation, async (request, response) => {
     if (!isRecord(request.body) || hasUnknownFields(request.body, CREATE_FIELDS)) {
       sendInvalid(response, "Provide only email, name, password, and role.");
       return;
@@ -182,12 +202,12 @@ export function createUsersRouter(
     const password = request.body.password;
     await handleRequest(
       response,
-      () => userService.create({ email, name, password, role }),
+      () => userService.create(request.actor!, { email, name, password, role }),
       201,
     );
   });
 
-  router.patch("/users/:userId", ...adminOnly, async (request, response) => {
+  router.patch("/users/:userId", ...adminMutation, async (request, response) => {
     const userId = readUuid(request.params.userId);
 
     if (!userId || !isRecord(request.body) || hasUnknownFields(request.body, UPDATE_FIELDS)) {
@@ -234,7 +254,7 @@ export function createUsersRouter(
     );
   });
 
-  router.patch("/users/:userId/status", ...adminOnly, async (request, response) => {
+  router.patch("/users/:userId/status", ...adminMutation, async (request, response) => {
     const userId = readUuid(request.params.userId);
     const isActive = isRecord(request.body) ? request.body.isActive : undefined;
 
@@ -248,7 +268,7 @@ export function createUsersRouter(
     );
   });
 
-  router.put("/users/:userId/password", ...adminOnly, async (request, response) => {
+  router.put("/users/:userId/password", ...adminMutation, async (request, response) => {
     const userId = readUuid(request.params.userId);
 
     if (
@@ -266,10 +286,10 @@ export function createUsersRouter(
     }
 
     const password = request.body.password;
-    await handleRequest(response, () => userService.resetPassword(userId, password));
+    await handleRequest(response, () => userService.resetPassword(request.actor!, userId, password));
   });
 
-  router.delete("/users/:userId", ...adminOnly, async (request, response) => {
+  router.delete("/users/:userId", ...adminMutation, async (request, response) => {
     const userId = readUuid(request.params.userId);
     if (!userId) {
       sendInvalid(response, "User ID must be a valid UUID.");

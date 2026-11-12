@@ -1,30 +1,379 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
+
 import { requireAuth } from "../auth/middleware.js";
 import type { AuthService } from "../auth/types.js";
-import { OpenCellServiceError, type OpenCellService } from "../opencell/types.js";
 import { churchDate } from "../config/church-date.js";
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-function err(r:Response,s:number,c:string,m:string){r.status(s).json({error:{code:c,message:m}})}
-function record(v:unknown):v is Record<string,unknown>{return typeof v==="object"&&v!==null&&!Array.isArray(v)}
-function uid(v:unknown){return typeof v==="string"&&UUID.test(v)?v:undefined}
-async function handle(r:Response,op:()=>Promise<unknown>,status=200){try{r.status(status).json({data:await op()})}catch(e){if(e instanceof OpenCellServiceError){err(r,e.status,e.code,e.message);return}err(r,500,"OPENCELL_SERVICE_UNAVAILABLE","OpenCell data is temporarily unavailable.")}}
-function fields(body:Record<string,unknown>,allowed:string[]){return Object.keys(body).some(k=>!allowed.includes(k))}
-function text(v:unknown,optional=true){if(v===undefined&&optional)return undefined;if(v===null&&optional)return null;return typeof v==="string"&&v.trim()?v.trim():undefined}
-export function createOpenCellRouter(authService:AuthService,service:OpenCellService){const router=Router();const auth=requireAuth(authService);
- router.get("/opencell/programmes",auth,async(req,res)=>{if(!req.actor)return;const search=typeof req.query.search==="string"?req.query.search.trim():"";const status=req.query.status===undefined?"active":req.query.status;if(!["active","finished","all"].includes(String(status))){err(res,400,"INVALID_REQUEST","Status must be active, finished, or all.");return}await handle(res,()=>service.list(req.actor!,{search,status:status as "active"|"finished"|"all"}))});
- router.get("/opencell/programmes/:id",auth,async(req,res)=>{const id=uid(req.params.id);if(!id){err(res,400,"INVALID_REQUEST","Programme ID must be a valid UUID.");return}await handle(res,()=>service.getById(req.actor!,id))});
- router.post("/opencell/programmes",auth,async(req,res)=>{if(!req.actor||!record(req.body)||fields(req.body,["name","description"])){err(res,400,"INVALID_REQUEST","Provide only name and description.");return}const name=text(req.body.name,false);const description=text(req.body.description);if(!name||description===undefined){err(res,400,"INVALID_REQUEST","Programme name is required.");return}await handle(res,()=>service.create(req.actor!,{name,description}),201)});
- router.patch("/opencell/programmes/:id",auth,async(req,res)=>{const id=uid(req.params.id);if(!id||!record(req.body)||fields(req.body,["name","description"])) {err(res,400,"INVALID_REQUEST","Provide only name and description.");return}const input:{name?:string;description?:string|null}={};if(Object.prototype.hasOwnProperty.call(req.body,"name")){const n=text(req.body.name,false);if(!n){err(res,400,"INVALID_REQUEST","Programme name is required.");return}input.name=n}if(Object.prototype.hasOwnProperty.call(req.body,"description")){const d=text(req.body.description);if(d===undefined){err(res,400,"INVALID_REQUEST","Description must be text or null.");return}input.description=d}await handle(res,()=>service.update(req.actor!,id,input))});
- router.post("/opencell/programmes/:id/finish",auth,async(req,res)=>{const id=uid(req.params.id);if(!id){err(res,400,"INVALID_REQUEST","Programme ID must be a valid UUID.");return}await handle(res,()=>service.finish(req.actor!,id))});
- router.get("/opencell/programmes/:id/sessions",auth,async(req,res)=>{const id=uid(req.params.id);if(!id){err(res,400,"INVALID_REQUEST","Programme ID must be a valid UUID.");return}await handle(res,()=>service.listSessions(req.actor!,id))});
- router.post("/opencell/programmes/:id/sessions",auth,async(req,res)=>{const id=uid(req.params.id);if(!id||!record(req.body)||fields(req.body,["sessionDate","title","location","notes"])){err(res,400,"INVALID_REQUEST","Provide the approved Session fields.");return}const sessionDate=text(req.body.sessionDate,false);const title=text(req.body.title);const location=text(req.body.location);const notes=text(req.body.notes);if(!sessionDate||title===undefined||location===undefined||notes===undefined){err(res,400,"INVALID_REQUEST","Session date is required.");return}await handle(res,()=>service.createSession(req.actor!,id,{sessionDate,title,location,notes}),201)});
- router.patch("/opencell/programmes/:id/sessions/:sessionId",auth,async(req,res)=>{const id=uid(req.params.id),sessionId=uid(req.params.sessionId);if(!id||!sessionId||!record(req.body)||fields(req.body,["sessionDate","title","location","notes"])){err(res,400,"INVALID_REQUEST","Provide the approved Session fields.");return}const input:Record<string,string|null>={};for(const key of ["sessionDate","title","location","notes"]){if(Object.prototype.hasOwnProperty.call(req.body,key)){const value=req.body[key];if(key==="sessionDate"){const v=text(value,false);if(!v){err(res,400,"INVALID_REQUEST","Session date is required.");return}input[key]=v}else{const v=text(value);if(v===undefined){err(res,400,"INVALID_REQUEST","Session fields must be text or null.");return}input[key]=v}}}await handle(res,()=>service.updateSession(req.actor!,id,sessionId,input))});
- router.patch("/opencell/programmes/:id/sessions/:sessionId/cancel",auth,async(req,res)=>{const id=uid(req.params.id),sessionId=uid(req.params.sessionId);if(!id||!sessionId){err(res,400,"INVALID_REQUEST","IDs must be valid UUIDs.");return}await handle(res,()=>service.cancelSession(req.actor!,id,sessionId))});
- router.get("/opencell/programmes/:id/participants",auth,async(req,res)=>{const id=uid(req.params.id);if(!id){err(res,400,"INVALID_REQUEST","Programme ID must be a valid UUID.");return}await handle(res,()=>service.listParticipants(req.actor!,id))});
- router.post("/opencell/programmes/:id/participants",auth,async(req,res)=>{const id=uid(req.params.id);if(!id||!record(req.body)||fields(req.body,["visitorId","enrolledOn"])){err(res,400,"INVALID_REQUEST","Provide an existing Visitor and optional enrollment date.");return}const visitorId=uid(req.body.visitorId);const enrolledOn=req.body.enrolledOn===undefined?churchDate():text(req.body.enrolledOn,false);if(!visitorId||!enrolledOn){err(res,400,"INVALID_REQUEST","Visitor ID and enrollment date are required.");return}await handle(res,()=>service.enroll(req.actor!,id,visitorId,enrolledOn),201)});
- router.delete("/opencell/programmes/:id/participants/:visitorId",auth,async(req,res)=>{const id=uid(req.params.id),visitorId=uid(req.params.visitorId);if(!id||!visitorId){err(res,400,"INVALID_REQUEST","IDs must be valid UUIDs.");return}await handle(res,()=>service.removeEnrollment(req.actor!,id,visitorId))});
- router.get("/opencell/programmes/:id/sessions/:sessionId/attendance",auth,async(req,res)=>{const id=uid(req.params.id),sessionId=uid(req.params.sessionId);if(!id||!sessionId){err(res,400,"INVALID_REQUEST","IDs must be valid UUIDs.");return}await handle(res,()=>service.listAttendance(req.actor!,id,sessionId))});
- router.post("/opencell/programmes/:id/sessions/:sessionId/attendance",auth,async(req,res)=>{const id=uid(req.params.id),sessionId=uid(req.params.sessionId),visitorId=record(req.body)?uid(req.body.visitorId):undefined;if(!id||!sessionId||!visitorId){err(res,400,"INVALID_REQUEST","Visitor ID is required.");return}await handle(res,()=>service.addAttendance(req.actor!,id,sessionId,visitorId),201)});
- router.delete("/opencell/programmes/:id/sessions/:sessionId/attendance/:visitorId",auth,async(req,res)=>{const id=uid(req.params.id),sessionId=uid(req.params.sessionId),visitorId=uid(req.params.visitorId);if(!id||!sessionId||!visitorId){err(res,400,"INVALID_REQUEST","IDs must be valid UUIDs.");return}await handle(res,()=>service.removeAttendance(req.actor!,id,sessionId,visitorId))});
- return router as Router;
+import { createRequestHandler, sendInvalid } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readRequiredText,
+  readUuid,
+} from "../http/validation.js";
+import {
+  OpenCellServiceError,
+  type OpenCellProgrammeStatusFilter,
+  type OpenCellService,
+  type UpdateOpenCellProgrammeInput,
+  type UpdateOpenCellSessionInput,
+} from "../opencell/types.js";
+
+const PROGRAMME_FIELDS = new Set(["name", "description"]);
+const SESSION_FIELDS = new Set(["sessionDate", "title", "location", "notes"]);
+const ENROLLMENT_FIELDS = new Set(["visitorId", "enrolledOn"]);
+const PROGRAMME_STATUS_FILTERS = ["active", "finished", "all"];
+const NULLABLE_SESSION_FIELDS = ["title", "location", "notes"] as const;
+
+const INVALID_PROGRAMME_ID = "Programme ID must be a valid UUID.";
+const INVALID_IDS = "IDs must be valid UUIDs.";
+const INVALID_PROGRAMME_FIELDS = "Provide only name and description.";
+const INVALID_SESSION_FIELDS = "Provide the approved Session fields.";
+const PROGRAMME_NAME_REQUIRED = "Programme name is required.";
+const SESSION_DATE_REQUIRED = "Session date is required.";
+
+const handle = createRequestHandler(OpenCellServiceError, {
+  code: "OPENCELL_SERVICE_UNAVAILABLE",
+  message: "OpenCell data is temporarily unavailable.",
+});
+
+type ParsedInput<Input> = { input: Input } | { message: string };
+
+/**
+ * Optional text field: a missing field stays undefined (rejected by callers that
+ * require the key), null stays null, and text must be non-blank once trimmed.
+ */
+function readNullableText(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return readRequiredText(value);
+}
+
+function readProgrammeUpdate(
+  body: Record<string, unknown>,
+): ParsedInput<UpdateOpenCellProgrammeInput> {
+  const input: UpdateOpenCellProgrammeInput = {};
+  if (hasOwn(body, "name")) {
+    const name = readRequiredText(body.name);
+    if (!name) return { message: PROGRAMME_NAME_REQUIRED };
+    input.name = name;
+  }
+  if (hasOwn(body, "description")) {
+    const description = readNullableText(body.description);
+    if (description === undefined) {
+      return { message: "Description must be text or null." };
+    }
+    input.description = description;
+  }
+  return { input };
+}
+
+function readSessionUpdate(
+  body: Record<string, unknown>,
+): ParsedInput<UpdateOpenCellSessionInput> {
+  const input: UpdateOpenCellSessionInput = {};
+  if (hasOwn(body, "sessionDate")) {
+    const sessionDate = readRequiredText(body.sessionDate);
+    if (!sessionDate) return { message: SESSION_DATE_REQUIRED };
+    input.sessionDate = sessionDate;
+  }
+  for (const field of NULLABLE_SESSION_FIELDS) {
+    if (!hasOwn(body, field)) continue;
+    const value = readNullableText(body[field]);
+    if (value === undefined) {
+      return { message: "Session fields must be text or null." };
+    }
+    input[field] = value;
+  }
+  return { input };
+}
+
+export function createOpenCellRouter(
+  authService: AuthService,
+  openCellService: OpenCellService,
+) {
+  const router = Router();
+  const authenticated = requireAuth(authService);
+
+  router.get("/opencell/programmes", authenticated, async (request, response) => {
+    if (!request.actor) return;
+    const search =
+      typeof request.query.search === "string" ? request.query.search.trim() : "";
+    const status = request.query.status === undefined ? "active" : request.query.status;
+    if (!PROGRAMME_STATUS_FILTERS.includes(String(status))) {
+      sendInvalid(response, "Status must be active, finished, or all.");
+      return;
+    }
+    // Express types query values loosely; the String() check above is the accepted-value rule.
+    const statusFilter = status as OpenCellProgrammeStatusFilter;
+    await handle(response, () =>
+      openCellService.list(request.actor!, { search, status: statusFilter }),
+    );
+  });
+
+  router.get("/opencell/programmes/:id", authenticated, async (request, response) => {
+    const programmeId = readUuid(request.params.id);
+    if (!programmeId) {
+      sendInvalid(response, INVALID_PROGRAMME_ID);
+      return;
+    }
+    await handle(response, () => openCellService.getById(request.actor!, programmeId));
+  });
+
+  router.post("/opencell/programmes", authenticated, async (request, response) => {
+    if (
+      !request.actor ||
+      !isRecord(request.body) ||
+      hasUnknownFields(request.body, PROGRAMME_FIELDS)
+    ) {
+      sendInvalid(response, INVALID_PROGRAMME_FIELDS);
+      return;
+    }
+    const name = readRequiredText(request.body.name);
+    const description = readNullableText(request.body.description);
+    if (!name || description === undefined) {
+      sendInvalid(response, PROGRAMME_NAME_REQUIRED);
+      return;
+    }
+    await handle(
+      response,
+      () => openCellService.create(request.actor!, { name, description }),
+      201,
+    );
+  });
+
+  router.patch("/opencell/programmes/:id", authenticated, async (request, response) => {
+    const programmeId = readUuid(request.params.id);
+    if (
+      !programmeId ||
+      !isRecord(request.body) ||
+      hasUnknownFields(request.body, PROGRAMME_FIELDS)
+    ) {
+      sendInvalid(response, INVALID_PROGRAMME_FIELDS);
+      return;
+    }
+    const update = readProgrammeUpdate(request.body);
+    if ("message" in update) {
+      sendInvalid(response, update.message);
+      return;
+    }
+    await handle(response, () =>
+      openCellService.update(request.actor!, programmeId, update.input),
+    );
+  });
+
+  router.post("/opencell/programmes/:id/finish", authenticated, async (request, response) => {
+    const programmeId = readUuid(request.params.id);
+    if (!programmeId) {
+      sendInvalid(response, INVALID_PROGRAMME_ID);
+      return;
+    }
+    await handle(response, () => openCellService.finish(request.actor!, programmeId));
+  });
+
+  router.get("/opencell/programmes/:id/sessions", authenticated, async (request, response) => {
+    const programmeId = readUuid(request.params.id);
+    if (!programmeId) {
+      sendInvalid(response, INVALID_PROGRAMME_ID);
+      return;
+    }
+    await handle(response, () =>
+      openCellService.listSessions(request.actor!, programmeId),
+    );
+  });
+
+  router.post("/opencell/programmes/:id/sessions", authenticated, async (request, response) => {
+    const programmeId = readUuid(request.params.id);
+    if (
+      !programmeId ||
+      !isRecord(request.body) ||
+      hasUnknownFields(request.body, SESSION_FIELDS)
+    ) {
+      sendInvalid(response, INVALID_SESSION_FIELDS);
+      return;
+    }
+    const sessionDate = readRequiredText(request.body.sessionDate);
+    const title = readNullableText(request.body.title);
+    const location = readNullableText(request.body.location);
+    const notes = readNullableText(request.body.notes);
+    if (
+      !sessionDate ||
+      title === undefined ||
+      location === undefined ||
+      notes === undefined
+    ) {
+      sendInvalid(response, SESSION_DATE_REQUIRED);
+      return;
+    }
+    await handle(
+      response,
+      () =>
+        openCellService.createSession(request.actor!, programmeId, {
+          sessionDate,
+          title,
+          location,
+          notes,
+        }),
+      201,
+    );
+  });
+
+  router.patch(
+    "/opencell/programmes/:id/sessions/:sessionId",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const sessionId = readUuid(request.params.sessionId);
+      if (
+        !programmeId ||
+        !sessionId ||
+        !isRecord(request.body) ||
+        hasUnknownFields(request.body, SESSION_FIELDS)
+      ) {
+        sendInvalid(response, INVALID_SESSION_FIELDS);
+        return;
+      }
+      const update = readSessionUpdate(request.body);
+      if ("message" in update) {
+        sendInvalid(response, update.message);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.updateSession(request.actor!, programmeId, sessionId, update.input),
+      );
+    },
+  );
+
+  router.patch(
+    "/opencell/programmes/:id/sessions/:sessionId/cancel",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const sessionId = readUuid(request.params.sessionId);
+      if (!programmeId || !sessionId) {
+        sendInvalid(response, INVALID_IDS);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.cancelSession(request.actor!, programmeId, sessionId),
+      );
+    },
+  );
+
+  router.get(
+    "/opencell/programmes/:id/participants",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      if (!programmeId) {
+        sendInvalid(response, INVALID_PROGRAMME_ID);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.listParticipants(request.actor!, programmeId),
+      );
+    },
+  );
+
+  router.post(
+    "/opencell/programmes/:id/participants",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      if (
+        !programmeId ||
+        !isRecord(request.body) ||
+        hasUnknownFields(request.body, ENROLLMENT_FIELDS)
+      ) {
+        sendInvalid(response, "Provide an existing Visitor and optional enrollment date.");
+        return;
+      }
+      const visitorId = readUuid(request.body.visitorId);
+      const enrolledOn =
+        request.body.enrolledOn === undefined
+          ? churchDate()
+          : readRequiredText(request.body.enrolledOn);
+      if (!visitorId || !enrolledOn) {
+        sendInvalid(response, "Visitor ID and enrollment date are required.");
+        return;
+      }
+      await handle(
+        response,
+        () => openCellService.enroll(request.actor!, programmeId, visitorId, enrolledOn),
+        201,
+      );
+    },
+  );
+
+  router.delete(
+    "/opencell/programmes/:id/participants/:visitorId",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const visitorId = readUuid(request.params.visitorId);
+      if (!programmeId || !visitorId) {
+        sendInvalid(response, INVALID_IDS);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.removeEnrollment(request.actor!, programmeId, visitorId),
+      );
+    },
+  );
+
+  router.get(
+    "/opencell/programmes/:id/sessions/:sessionId/attendance",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const sessionId = readUuid(request.params.sessionId);
+      if (!programmeId || !sessionId) {
+        sendInvalid(response, INVALID_IDS);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.listAttendance(request.actor!, programmeId, sessionId),
+      );
+    },
+  );
+
+  router.post(
+    "/opencell/programmes/:id/sessions/:sessionId/attendance",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const sessionId = readUuid(request.params.sessionId);
+      const visitorId = isRecord(request.body)
+        ? readUuid(request.body.visitorId)
+        : undefined;
+      if (!programmeId || !sessionId || !visitorId) {
+        sendInvalid(response, "Visitor ID is required.");
+        return;
+      }
+      await handle(
+        response,
+        () => openCellService.addAttendance(request.actor!, programmeId, sessionId, visitorId),
+        201,
+      );
+    },
+  );
+
+  router.delete(
+    "/opencell/programmes/:id/sessions/:sessionId/attendance/:visitorId",
+    authenticated,
+    async (request, response) => {
+      const programmeId = readUuid(request.params.id);
+      const sessionId = readUuid(request.params.sessionId);
+      const visitorId = readUuid(request.params.visitorId);
+      if (!programmeId || !sessionId || !visitorId) {
+        sendInvalid(response, INVALID_IDS);
+        return;
+      }
+      await handle(response, () =>
+        openCellService.removeAttendance(request.actor!, programmeId, sessionId, visitorId),
+      );
+    },
+  );
+
+  return router;
 }

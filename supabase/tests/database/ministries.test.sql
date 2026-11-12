@@ -131,7 +131,9 @@ values (
   '84444444-4444-4444-8444-444444444444'
 );
 select is(
-  (select count(*) from public.member_ministries),
+  (select count(*) from public.member_ministries
+   where member_id = '83333333-3333-4333-8333-333333333333'
+     and ministry_id = '84444444-4444-4444-8444-444444444444'),
   1::bigint,
   'a valid Member-Ministry assignment can be created'
 );
@@ -180,7 +182,9 @@ select is(
   'Ministry archive uses is_active false'
 );
 select is(
-  (select count(*) from public.member_ministries),
+  (select count(*) from public.member_ministries
+   where member_id = '83333333-3333-4333-8333-333333333333'
+     and ministry_id = '84444444-4444-4444-8444-444444444444'),
   1::bigint,
   'archiving a Ministry preserves assignments'
 );
@@ -188,7 +192,9 @@ select is(
 update public.members set is_active = false
 where id = '83333333-3333-4333-8333-333333333333';
 select is(
-  (select count(*) from public.member_ministries),
+  (select count(*) from public.member_ministries
+   where member_id = '83333333-3333-4333-8333-333333333333'
+     and ministry_id = '84444444-4444-4444-8444-444444444444'),
   1::bigint,
   'archiving a Member preserves assignments'
 );

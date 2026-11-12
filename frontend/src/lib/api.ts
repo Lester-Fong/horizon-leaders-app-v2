@@ -5,6 +5,8 @@ export type AppRole = 'admin' | 'leader'
 export interface HorizonActor {
   id: string
   isActive: true
+  /** True while the account still uses a password an Admin set. */
+  mustChangePassword: boolean
   name: string
   role: AppRole
 }
@@ -413,8 +415,47 @@ export class ApiError extends Error {
   }
 }
 
+/** A slice of a server-side list: `limit` is 1–100 and `offset` is 0 or more. */
+export interface PageRequest {
+  limit: number
+  offset: number
+}
+
+export interface PageMeta {
+  hasMore: boolean
+  limit: number
+  offset: number
+  total: number
+}
+
+export interface ApiPage<T> {
+  items: T[]
+  meta: PageMeta
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+export function isPageMeta(value: unknown): value is PageMeta {
+  return (
+    isRecord(value) &&
+    typeof value.hasMore === 'boolean' &&
+    isNonNegativeInteger(value.limit) &&
+    value.limit > 0 &&
+    isNonNegativeInteger(value.offset) &&
+    isNonNegativeInteger(value.total)
+  )
+}
+
+function withPage(searchParameters: URLSearchParams, page: PageRequest) {
+  searchParameters.set('limit', String(page.limit))
+  searchParameters.set('offset', String(page.offset))
+  return searchParameters
 }
 
 function isHorizonActor(value: unknown): value is HorizonActor {
@@ -422,6 +463,7 @@ function isHorizonActor(value: unknown): value is HorizonActor {
     isRecord(value) &&
     typeof value.id === 'string' &&
     value.isActive === true &&
+    typeof value.mustChangePassword === 'boolean' &&
     typeof value.name === 'string' &&
     (value.role === 'admin' || value.role === 'leader')
   )
@@ -822,12 +864,48 @@ function readApiError(payload: unknown) {
 
 const apiUrl = readApiUrl({ VITE_API_URL: import.meta.env.VITE_API_URL })
 
+const invalidResponse = () =>
+  new ApiError(502, 'INVALID_RESPONSE', 'The server returned an invalid response.')
+
 async function requestApi<T>(
   accessToken: string,
   path: string,
   isExpected: (value: unknown) => value is T,
   init?: RequestInit,
 ): Promise<T> {
+  const payload = await requestApiPayload(accessToken, path, init)
+  if (!isExpected(payload.data)) throw invalidResponse()
+  return payload.data
+}
+
+/** Reads a `{ data, meta }` list page whose `data` wraps the items in another shape. */
+async function requestApiPageEnvelope<T>(
+  accessToken: string,
+  path: string,
+  isExpected: (value: unknown) => value is T,
+): Promise<{ data: T; meta: PageMeta }> {
+  const payload = await requestApiPayload(accessToken, path)
+  if (!isExpected(payload.data) || !isPageMeta(payload.meta)) throw invalidResponse()
+  return { data: payload.data, meta: payload.meta }
+}
+
+/** Reads a `{ data: [...], meta }` list page, validating every item with `isItem`. */
+async function requestApiPage<T>(
+  accessToken: string,
+  path: string,
+  isItem: (value: unknown) => value is T,
+): Promise<ApiPage<T>> {
+  const isItemList = (value: unknown): value is T[] =>
+    Array.isArray(value) && value.every(isItem)
+  const { data, meta } = await requestApiPageEnvelope(accessToken, path, isItemList)
+  return { items: data, meta }
+}
+
+async function requestApiPayload(
+  accessToken: string,
+  path: string,
+  init?: RequestInit,
+): Promise<Record<string, unknown>> {
   const response = await fetch(
     `${apiUrl.replace(/\/$/, '')}/api${path}`,
     {
@@ -854,15 +932,8 @@ async function requestApi<T>(
     )
   }
 
-  if (!isRecord(payload) || !isExpected(payload.data)) {
-    throw new ApiError(
-      502,
-      'INVALID_RESPONSE',
-      'The server returned an invalid response.',
-    )
-  }
-
-  return payload.data
+  if (!isRecord(payload)) throw invalidResponse()
+  return payload
 }
 
 const isLifeGroupList = (value: unknown): value is LifeGroup[] =>
@@ -976,10 +1047,7 @@ export function createMember(accessToken: string, input: MemberInput) {
   })
 }
 
-export function getMembers(
-  accessToken: string,
-  filters: MemberListFilters = {},
-) {
+function memberListParameters(filters: MemberListFilters) {
   const searchParameters = new URLSearchParams()
   if (filters.search) searchParameters.set('search', filters.search)
   if (filters.lifeGroupId) {
@@ -988,8 +1056,26 @@ export function getMembers(
   if (filters.status) searchParameters.set('status', filters.status)
   if (filters.gender) searchParameters.set('gender', filters.gender)
   if (filters.age) searchParameters.set('age', filters.age)
+  return searchParameters
+}
+
+/** Every authorized Member matching the filters (for pickers and selectors). */
+export function getMembers(
+  accessToken: string,
+  filters: MemberListFilters = {},
+) {
+  const searchParameters = memberListParameters(filters)
   const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
   return requestApi(accessToken, `/members${query}`, isMemberList)
+}
+
+export function getMembersPage(
+  accessToken: string,
+  filters: MemberListFilters,
+  page: PageRequest,
+) {
+  const searchParameters = withPage(memberListParameters(filters), page)
+  return requestApiPage(accessToken, `/members?${searchParameters}`, isMemberSummary)
 }
 
 export function getDashboard(accessToken: string, period: DashboardPeriod = '8', lifeGroupId?: string) {
@@ -1140,6 +1226,21 @@ export function getGatherings(accessToken: string, lifeGroupId: string) {
     `/life-groups/${lifeGroupId}/gatherings`,
     isGatheringDirectory,
   )
+}
+
+/** The Life Group with one page of its Gatherings, newest first. */
+export async function getGatheringsPage(
+  accessToken: string,
+  lifeGroupId: string,
+  page: PageRequest,
+): Promise<ApiPage<LifeGroupGathering> & { lifeGroup: GatheringLifeGroup }> {
+  const searchParameters = withPage(new URLSearchParams(), page)
+  const { data, meta } = await requestApiPageEnvelope(
+    accessToken,
+    `/life-groups/${lifeGroupId}/gatherings?${searchParameters}`,
+    isGatheringDirectory,
+  )
+  return { items: data.gatherings, lifeGroup: data.lifeGroup, meta }
 }
 
 export function getGathering(
@@ -1361,15 +1462,30 @@ export function recordHarvestInterest(accessToken: string, eventId: string, visi
   })
 }
 
+function visitorListParameters(filters: VisitorListFilters) {
+  const searchParameters = new URLSearchParams()
+  if (filters.search) searchParameters.set('search', filters.search)
+  if (filters.status) searchParameters.set('status', filters.status)
+  return searchParameters
+}
+
+/** Every authorized Visitor matching the filters (for pickers and selectors). */
 export function getVisitors(
   accessToken: string,
   filters: VisitorListFilters = {},
 ) {
-  const searchParameters = new URLSearchParams()
-  if (filters.search) searchParameters.set('search', filters.search)
-  if (filters.status) searchParameters.set('status', filters.status)
+  const searchParameters = visitorListParameters(filters)
   const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
   return requestApi(accessToken, `/visitors${query}`, isVisitorList)
+}
+
+export function getVisitorsPage(
+  accessToken: string,
+  filters: VisitorListFilters,
+  page: PageRequest,
+) {
+  const searchParameters = withPage(visitorListParameters(filters), page)
+  return requestApiPage(accessToken, `/visitors?${searchParameters}`, isVisitor)
 }
 
 export function getVisitor(accessToken: string, visitorId: string) {
@@ -1434,6 +1550,15 @@ export function getFollowUps(
   )
 }
 
+export function getFollowUpsPage(
+  accessToken: string,
+  status: FollowUpStatus,
+  page: PageRequest,
+) {
+  const searchParameters = withPage(new URLSearchParams({ status }), page)
+  return requestApiPage(accessToken, `/follow-ups?${searchParameters}`, isFollowUp)
+}
+
 export function completeFollowUp(
   accessToken: string,
   followUpId: string,
@@ -1454,6 +1579,18 @@ export function updateLifeGroup(
 ) {
   return requestApi(accessToken, `/life-groups/${lifeGroupId}`, isLifeGroup, {
     body: JSON.stringify(input),
+    method: 'PATCH',
+  })
+}
+
+/** Changes only a Life Group's Leader; the server validates the new Leader. */
+export function reassignLifeGroupLeader(
+  accessToken: string,
+  lifeGroupId: string,
+  leaderProfileId: string,
+) {
+  return requestApi(accessToken, `/life-groups/${lifeGroupId}`, isLifeGroup, {
+    body: JSON.stringify({ leaderProfileId }),
     method: 'PATCH',
   })
 }
@@ -1609,12 +1746,26 @@ const isManagedUserList = (value: unknown): value is ManagedUser[] =>
 const isUserIdResult = (value: unknown): value is { id: string } =>
   isRecord(value) && typeof value.id === 'string'
 
-export function getUsers(accessToken: string, filters: UserListFilters = {}) {
+function userListParameters(filters: UserListFilters) {
   const searchParameters = new URLSearchParams()
   if (filters.search) searchParameters.set('search', filters.search)
   if (filters.status) searchParameters.set('status', filters.status)
+  return searchParameters
+}
+
+export function getUsers(accessToken: string, filters: UserListFilters = {}) {
+  const searchParameters = userListParameters(filters)
   const query = searchParameters.size > 0 ? `?${searchParameters}` : ''
   return requestApi(accessToken, `/users${query}`, isManagedUserList)
+}
+
+export function getUsersPage(
+  accessToken: string,
+  filters: UserListFilters,
+  page: PageRequest,
+) {
+  const searchParameters = withPage(userListParameters(filters), page)
+  return requestApiPage(accessToken, `/users?${searchParameters}`, isManagedUser)
 }
 
 export function createUser(accessToken: string, input: CreateUserInput) {
@@ -1656,5 +1807,69 @@ export function getMyProfile(accessToken: string) {
 export function deleteUser(accessToken: string, userId: string) {
   return requestApi(accessToken, `/users/${userId}`, isUserIdResult, {
     method: 'DELETE',
+  })
+}
+
+export type UserActivityAction =
+  | 'password_changed'
+  | 'password_reset'
+  | 'user_created'
+  | 'user_deactivated'
+  | 'user_deleted'
+  | 'user_reactivated'
+  | 'user_updated'
+
+export interface UserActivityEvent {
+  action: UserActivityAction
+  actorId: string
+  actorName: string
+  createdAt: string
+  details: Record<string, unknown>
+  id: string
+  targetName: string
+  targetUserId: string
+}
+
+const USER_ACTIVITY_ACTIONS = new Set<string>([
+  'password_changed',
+  'password_reset',
+  'user_created',
+  'user_deactivated',
+  'user_deleted',
+  'user_reactivated',
+  'user_updated',
+])
+
+function isUserActivityEvent(value: unknown): value is UserActivityEvent {
+  return (
+    isRecord(value) &&
+    typeof value.action === 'string' &&
+    USER_ACTIVITY_ACTIONS.has(value.action) &&
+    typeof value.actorId === 'string' &&
+    typeof value.actorName === 'string' &&
+    typeof value.createdAt === 'string' &&
+    isRecord(value.details) &&
+    typeof value.id === 'string' &&
+    typeof value.targetName === 'string' &&
+    typeof value.targetUserId === 'string'
+  )
+}
+
+const isUserActivityList = (value: unknown): value is UserActivityEvent[] =>
+  Array.isArray(value) && value.every(isUserActivityEvent)
+
+export function getUserActivity(accessToken: string, userId: string) {
+  return requestApi(accessToken, `/users/${userId}/activity`, isUserActivityList)
+}
+
+/** Changes the signed-in user's own password. Every session is signed out afterwards. */
+export function changeMyPassword(
+  accessToken: string,
+  currentPassword: string,
+  newPassword: string,
+) {
+  return requestApi(accessToken, '/me/password', isUserIdResult, {
+    body: JSON.stringify({ currentPassword, newPassword }),
+    method: 'PUT',
   })
 }

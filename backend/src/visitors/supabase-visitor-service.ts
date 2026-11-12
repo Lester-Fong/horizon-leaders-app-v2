@@ -7,8 +7,14 @@ import {
   MEMBER_QR_TOKEN_COLLISION_RETRIES,
 } from "../members/member-qr-token.js";
 import type { MemberService } from "../members/types.js";
+import {
+  fetchAllRows,
+  fetchRowPage,
+  type CountOptions,
+} from "../db/range-queries.js";
+import { buildPageMeta, pageFromArray } from "../http/pagination.js";
+import type { Database } from "../types/database.overrides.js";
 import type {
-  Database,
   Tables,
   TablesInsert,
   TablesUpdate,
@@ -231,6 +237,31 @@ export function createSupabaseVisitorService({
     ].some((value) => value?.toLocaleLowerCase().includes(needle));
   }
 
+  /** Leaders see only active Visitors; ordering ends with `id` so batches are stable. */
+  function buildListQuery(
+    actor: HorizonActor,
+    options: ListVisitorsOptions,
+    countOptions?: CountOptions,
+  ) {
+    const query = supabase
+      .from("visitors")
+      .select(VISITOR_COLUMNS, countOptions)
+      .order("last_name")
+      .order("first_name")
+      .order("id");
+    if (actor.role === "leader") return query.eq("status", "active");
+    return options.status === "all" ? query : query.eq("status", options.status);
+  }
+
+  /** Every matching Visitor; search is evaluated in memory after hydration. */
+  async function listAll(actor: HorizonActor, options: ListVisitorsOptions) {
+    const { data, error } = await fetchAllRows(() => buildListQuery(actor, options));
+    if (error) throw serviceUnavailable();
+    return (await hydrateVisitors(data)).filter((visitor) =>
+      matchesSearch(visitor, options.search),
+    );
+  }
+
   async function findMemberConflict(
     visitor: VisitorRow,
     field: "email" | "phone",
@@ -302,22 +333,17 @@ export function createSupabaseVisitorService({
   }
 
   return {
-    async list(actor, options: ListVisitorsOptions) {
-      let query = supabase
-        .from("visitors")
-        .select(VISITOR_COLUMNS)
-        .order("last_name")
-        .order("first_name");
-      if (actor.role === "leader") {
-        query = query.eq("status", "active");
-      } else if (options.status !== "all") {
-        query = query.eq("status", options.status);
-      }
-      const { data, error } = await query;
-      if (error) throw serviceUnavailable();
-      return (await hydrateVisitors(data)).filter((visitor) =>
-        matchesSearch(visitor, options.search),
+    list: listAll,
+
+    async listPage(actor, options, page) {
+      if (options.search) return pageFromArray(await listAll(actor, options), page);
+      const { data, error } = await fetchRowPage(
+        (countOptions) => buildListQuery(actor, options, countOptions),
+        page,
       );
+      if (error) throw serviceUnavailable();
+      const items = await hydrateVisitors(data.rows);
+      return { items, meta: buildPageMeta(page, data.total, items.length) };
     },
 
     async getById(actor, visitorId) {

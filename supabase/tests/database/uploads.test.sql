@@ -132,7 +132,17 @@ select ok((select logo_path is null from public.life_groups where id = 'b2000000
 select ok((select image_path is null from public.events where id = 'b4000000-0000-4000-8000-000000000004'), 'Event image may be removed');
 
 select is(
-  (select count(*) from storage.objects where bucket_id = 'horizon-uploads'),
+  (
+    -- Scoped to unreferenced objects so real uploads in a local/demo database
+    -- do not fail the check. Every legitimate upload is owned by a domain row
+    -- path; a migration-fabricated object would be referenced by none.
+    select count(*)
+    from storage.objects objects
+    where objects.bucket_id = 'horizon-uploads'
+      and not exists (select 1 from public.members where photo_path = objects.name)
+      and not exists (select 1 from public.life_groups where logo_path = objects.name)
+      and not exists (select 1 from public.events where image_path = objects.name)
+  ),
   0::bigint,
   'migration creates no fabricated upload objects'
 );

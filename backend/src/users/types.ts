@@ -38,8 +38,30 @@ export interface UpdateUserInput {
   role?: AppRole;
 }
 
+export type UserActivityAction =
+  | "password_changed"
+  | "password_reset"
+  | "user_created"
+  | "user_deactivated"
+  | "user_deleted"
+  | "user_reactivated"
+  | "user_updated";
+
+export interface UserActivityEvent {
+  action: UserActivityAction;
+  actorId: string;
+  actorName: string;
+  createdAt: string;
+  details: Record<string, unknown>;
+  id: string;
+  targetName: string;
+  targetUserId: string;
+}
+
 export type UserErrorCode =
   | "CANNOT_MODIFY_OWN_ACCOUNT"
+  | "CURRENT_PASSWORD_INCORRECT"
+  | "PASSWORD_UNCHANGED"
   | "EMAIL_ALREADY_REGISTERED"
   | "USER_HAS_HISTORY"
   | "USER_NOT_FOUND"
@@ -61,11 +83,21 @@ export class UserServiceError extends Error {
 }
 
 export interface UserService {
-  create(input: CreateUserInput): Promise<ManagedUser>;
+  changeOwnPassword(
+    actor: HorizonActor,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ id: string }>;
+  create(actor: HorizonActor, input: CreateUserInput): Promise<ManagedUser>;
   delete(actor: HorizonActor, userId: string): Promise<{ id: string }>;
   getById(userId: string): Promise<ManagedUser>;
   list(options: ListUsersOptions): Promise<ManagedUser[]>;
-  resetPassword(userId: string, password: string): Promise<{ id: string }>;
+  listActivity(userId: string): Promise<UserActivityEvent[]>;
+  resetPassword(
+    actor: HorizonActor,
+    userId: string,
+    password: string,
+  ): Promise<{ id: string }>;
   setActive(
     actor: HorizonActor,
     userId: string,

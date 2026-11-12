@@ -60,6 +60,10 @@ function createMemberService(): MemberService {
     create: vi.fn(async () => member),
     getById: vi.fn(async () => member),
     list: vi.fn(async () => [member]),
+    listPage: vi.fn(async (_actor, _options, page) => ({
+      items: [member],
+      meta: { hasMore: true, limit: page.limit, offset: page.offset, total: 132 },
+    })),
     update: vi.fn(async () => member),
   };
 }
@@ -325,5 +329,74 @@ describe("Member API read and mutation boundary", () => {
       code: "DUPLICATE_MEMBER_EMAIL",
       message: "Another Member already uses this email address.",
     });
+  });
+});
+
+describe("Member API pagination", () => {
+  it("keeps the complete { data } list without a limit", async () => {
+    const { app, memberService } = createTestApp();
+
+    const response = await request(app)
+      .get("/api/members")
+      .set("Authorization", "Bearer admin-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: [expect.objectContaining({ id: memberId })] });
+    expect(response.body.data[0]).not.toHaveProperty("qrToken");
+    expect(memberService.listPage).not.toHaveBeenCalled();
+  });
+
+  it("returns one page with meta after the scoped filters", async () => {
+    const { app, memberService } = createTestApp();
+
+    const response = await request(app)
+      .get(`/api/members?limit=50&offset=50&search=%20ana%20&lifeGroupId=${groupId}&gender=female`)
+      .set("Authorization", "Bearer admin-token");
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta).toEqual({ hasMore: true, limit: 50, offset: 50, total: 132 });
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0]).not.toHaveProperty("qrToken");
+    expect(memberService.listPage).toHaveBeenCalledWith(
+      actors.admin,
+      { gender: "female", lifeGroupId: groupId, search: "ana", status: "active" },
+      { limit: 50, offset: 50 },
+    );
+    expect(memberService.list).not.toHaveBeenCalled();
+  });
+
+  it("keeps Leader scope rules when paginating", async () => {
+    const { app, memberService } = createTestApp();
+
+    await request(app)
+      .get(`/api/members?limit=10&status=all&lifeGroupId=${otherGroupId}`)
+      .set("Authorization", "Bearer leader-token");
+
+    expect(memberService.listPage).toHaveBeenCalledWith(
+      actors.leader,
+      { status: "active" },
+      { limit: 10, offset: 0 },
+    );
+  });
+
+  it.each([
+    "limit=0",
+    "limit=101",
+    "limit=abc",
+    "limit=10&offset=-1",
+    "limit=10&offset=1.5",
+    "offset=10",
+    "limit=10&limit=20",
+  ])("rejects %s with INVALID_REQUEST", async (query) => {
+    const { app, memberService } = createTestApp();
+
+    const response = await request(app)
+      .get(`/api/members?${query}`)
+      .set("Authorization", "Bearer admin-token");
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("INVALID_REQUEST");
+    expect(memberService.list).not.toHaveBeenCalled();
+    expect(memberService.listPage).not.toHaveBeenCalled();
   });
 });

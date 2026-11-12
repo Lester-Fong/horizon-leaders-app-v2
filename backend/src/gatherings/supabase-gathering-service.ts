@@ -1,6 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
+import {
+  chunk,
+  fetchAllRows,
+  fetchRowPage,
+  type CountOptions,
+} from "../db/range-queries.js";
+import { buildPageMeta } from "../http/pagination.js";
 import type {
   Database,
   Tables,
@@ -132,25 +139,48 @@ export function createSupabaseGatheringService({
     return { gathering: data, lifeGroup };
   }
 
+  /** Newest Gathering first; `id` keeps the order stable across pages. */
+  function buildListQuery(lifeGroupId: string, countOptions?: CountOptions) {
+    return supabase
+      .from("life_group_gatherings")
+      .select(GATHERING_COLUMNS, countOptions)
+      .eq("life_group_id", lifeGroupId)
+      .order("gathering_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id");
+  }
+
   async function attendanceCounts(gatheringIds: string[]) {
-    if (gatheringIds.length === 0) return new Map<string, number>();
-    const [members, visitors] = await Promise.all([
-      supabase
-        .from("life_group_gathering_attendance")
-        .select("gathering_id")
-        .in("gathering_id", gatheringIds),
-      supabase
-        .from("life_group_gathering_visitor_attendance")
-        .select("gathering_id")
-        .in("gathering_id", gatheringIds),
-    ]);
-    if (members.error || visitors.error) throw serviceUnavailable();
     const counts = new Map<string, number>();
-    for (const attendance of [...members.data, ...visitors.data]) {
-      counts.set(
-        attendance.gathering_id,
-        (counts.get(attendance.gathering_id) ?? 0) + 1,
-      );
+    // Attendance rows outnumber Gatherings, so each ID chunk is read in batches too.
+    const results = await Promise.all(
+      chunk(gatheringIds).flatMap((ids) => [
+        fetchAllRows(() =>
+          supabase
+            .from("life_group_gathering_attendance")
+            .select("gathering_id")
+            .in("gathering_id", ids)
+            .order("gathering_id")
+            .order("member_id"),
+        ),
+        fetchAllRows(() =>
+          supabase
+            .from("life_group_gathering_visitor_attendance")
+            .select("gathering_id")
+            .in("gathering_id", ids)
+            .order("gathering_id")
+            .order("visitor_id"),
+        ),
+      ]),
+    );
+    for (const { data, error } of results) {
+      if (error) throw serviceUnavailable();
+      for (const attendance of data) {
+        counts.set(
+          attendance.gathering_id,
+          (counts.get(attendance.gathering_id) ?? 0) + 1,
+        );
+      }
     }
     return counts;
   }
@@ -298,16 +328,27 @@ export function createSupabaseGatheringService({
   return {
     async list(actor, lifeGroupId) {
       const lifeGroup = await getScopedLifeGroup(actor, lifeGroupId);
-      const { data, error } = await supabase
-        .from("life_group_gatherings")
-        .select(GATHERING_COLUMNS)
-        .eq("life_group_id", lifeGroupId)
-        .order("gathering_date", { ascending: false })
-        .order("created_at", { ascending: false });
+      const { data, error } = await fetchAllRows(() =>
+        buildListQuery(lifeGroupId),
+      );
       if (error) throw serviceUnavailable();
       return {
         gatherings: await hydrate(data, lifeGroup),
         lifeGroup: mapLifeGroup(lifeGroup),
+      };
+    },
+
+    async listPage(actor, lifeGroupId, page) {
+      const lifeGroup = await getScopedLifeGroup(actor, lifeGroupId);
+      const { data, error } = await fetchRowPage(
+        (countOptions) => buildListQuery(lifeGroupId, countOptions),
+        page,
+      );
+      if (error) throw serviceUnavailable();
+      const gatherings = await hydrate(data.rows, lifeGroup);
+      return {
+        directory: { gatherings, lifeGroup: mapLifeGroup(lifeGroup) },
+        meta: buildPageMeta(page, data.total, gatherings.length),
       };
     },
 

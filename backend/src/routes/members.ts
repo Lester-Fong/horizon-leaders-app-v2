@@ -1,7 +1,21 @@
-import { Router, type Response } from "express";
+import { Router } from "express";
 
 import { requireAuth, requireRole } from "../auth/middleware.js";
-import type { AuthService } from "../auth/types.js";
+import type { AuthService, HorizonActor } from "../auth/types.js";
+import {
+  PagedData,
+  readPageRequest,
+  type PageRequest,
+} from "../http/pagination.js";
+import { createRequestHandler, sendError, sendInvalid } from "../http/responses.js";
+import {
+  hasOwn,
+  hasUnknownFields,
+  isRecord,
+  readOptionalText,
+  readRequiredText,
+  readUuid,
+} from "../http/validation.js";
 import { toMemberSummary } from "../members/member-projection.js";
 import {
   MemberServiceError,
@@ -15,15 +29,6 @@ import {
   type UpdateMemberInput,
 } from "../members/types.js";
 
-interface ApiErrorBody {
-  error: {
-    code: string;
-    message: string;
-  };
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const CREATE_FIELDS = new Set([
   "address",
@@ -37,40 +42,10 @@ const CREATE_FIELDS = new Set([
 ]);
 const UPDATE_FIELDS = CREATE_FIELDS;
 
-function sendError(
-  response: Response<ApiErrorBody>,
-  status: number,
-  code: string,
-  message: string,
-) {
-  return response.status(status).json({ error: { code, message } });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasOwn(record: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function hasUnknownFields(
-  record: Record<string, unknown>,
-  allowedFields: Set<string>,
-) {
-  return Object.keys(record).some((key) => !allowedFields.has(key));
-}
-
-function readRequiredName(value: unknown) {
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  return value.trim();
-}
-
-function readOptionalText(value: unknown) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== "string") return undefined;
-  return value.trim() || null;
-}
+const handleRequest = createRequestHandler(MemberServiceError, {
+  code: "MEMBER_SERVICE_UNAVAILABLE",
+  message: "Member data is temporarily unavailable.",
+});
 
 function readGender(value: unknown): MemberGender | null | undefined {
   if (value === null || value === undefined || value === "") return null;
@@ -85,11 +60,6 @@ function readBirthDate(value: unknown): string | null | undefined {
   return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== value
     ? undefined
     : value;
-}
-
-function readUuid(value: unknown) {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) return undefined;
-  return value;
 }
 
 function readQueryString(value: unknown) {
@@ -115,32 +85,9 @@ function readAgeFilter(value: unknown): MemberAgeFilter | undefined {
     : undefined;
 }
 
-async function handleRequest(
-  response: Response,
-  operation: () => Promise<unknown>,
-  successStatus = 200,
-) {
-  try {
-    const data = await operation();
-    response.status(successStatus).json({ data });
-  } catch (error) {
-    if (error instanceof MemberServiceError) {
-      sendError(response, error.status, error.code, error.message);
-      return;
-    }
-
-    sendError(
-      response,
-      500,
-      "MEMBER_SERVICE_UNAVAILABLE",
-      "Member data is temporarily unavailable.",
-    );
-  }
-}
-
 function readCreateInput(body: Record<string, unknown>): CreateMemberInput | undefined {
-  const firstName = readRequiredName(body.firstName);
-  const lastName = readRequiredName(body.lastName);
+  const firstName = readRequiredText(body.firstName);
+  const lastName = readRequiredText(body.lastName);
   const phone = readOptionalText(body.phone);
   const email = readOptionalText(body.email);
   const address = readOptionalText(body.address);
@@ -177,12 +124,12 @@ function readUpdateInput(body: Record<string, unknown>) {
   const update: UpdateMemberInput = {};
 
   if (hasOwn(body, "firstName")) {
-    const firstName = readRequiredName(body.firstName);
+    const firstName = readRequiredText(body.firstName);
     if (!firstName) return undefined;
     update.firstName = firstName;
   }
   if (hasOwn(body, "lastName")) {
-    const lastName = readRequiredName(body.lastName);
+    const lastName = readRequiredText(body.lastName);
     if (!lastName) return undefined;
     update.lastName = lastName;
   }
@@ -228,8 +175,29 @@ export function createMembersRouter(
   const authenticated = requireAuth(authService);
   const adminOnly = requireRole("admin");
 
+  function listMembers(
+    actor: HorizonActor,
+    options: ListMembersOptions,
+    page: PageRequest | undefined,
+  ) {
+    if (!page) {
+      return memberService.list(actor, options).then((members) =>
+        members.map(toMemberSummary),
+      );
+    }
+    return memberService.listPage(actor, options, page).then(
+      ({ items, meta }) => new PagedData(items.map(toMemberSummary), meta),
+    );
+  }
+
   router.get("/members", authenticated, async (request, response) => {
     if (!request.actor) return;
+
+    const pagination = readPageRequest(request.query);
+    if (!pagination.ok) {
+      sendInvalid(response, pagination.message);
+      return;
+    }
 
     const searchValue = request.query.search;
     if (searchValue !== undefined && typeof searchValue !== "string") {
@@ -257,9 +225,7 @@ export function createMembersRouter(
       };
       response.set("Cache-Control", "private, no-store");
       await handleRequest(response, () =>
-        memberService.list(request.actor!, options).then((members) =>
-          members.map(toMemberSummary),
-        ),
+        listMembers(request.actor!, options, pagination.page),
       );
       return;
     }
@@ -311,9 +277,7 @@ export function createMembersRouter(
     if (age) options.age = age;
     response.set("Cache-Control", "private, no-store");
     await handleRequest(response, () =>
-      memberService.list(request.actor!, options).then((members) =>
-        members.map(toMemberSummary),
-      ),
+      listMembers(request.actor!, options, pagination.page),
     );
   });
 

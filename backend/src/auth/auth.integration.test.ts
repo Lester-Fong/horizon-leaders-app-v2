@@ -96,6 +96,7 @@ describeWithLocalSupabase("local Supabase Auth integration", () => {
       data: {
         id: createdUserId,
         isActive: true,
+        mustChangePassword: false,
         name: displayName,
         role: "leader",
       },

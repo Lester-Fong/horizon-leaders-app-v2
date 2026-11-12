@@ -67,7 +67,22 @@ test('Admin manages a staff user through create, sign-in, edit, deactivate, reac
   await expect(rowFor(page, userName)).toContainText('Leader')
   await signOut(page)
 
-  await login(page, userAccount)
+  // An Admin-set password is temporary: the new user must choose their own first.
+  await page.goto('/login')
+  await page.getByLabel('Email').fill(userAccount.email)
+  await page.getByLabel('Password').fill(userAccount.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('heading', { name: 'Set your own password' })).toBeVisible()
+  const blocked = await callApiAsCurrentBrowserUser(page, '/members')
+  expect(blocked.status).toBe(403)
+  const personalPassword = 'Personal3Horizon'
+  await page.getByLabel('Current password').fill(userAccount.password)
+  await page.getByLabel(/^New password/).fill(personalPassword)
+  await page.getByLabel('Confirm new password').fill(personalPassword)
+  await page.getByRole('button', { name: 'Save and continue' }).click()
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  userAccount.password = personalPassword
+
   await expect(page.getByRole('link', { name: /^Users\b/ })).toHaveCount(0)
   const denied = await callApiAsCurrentBrowserUser(page, '/users')
   expect(denied.status).toBe(403)
@@ -88,6 +103,15 @@ test('Admin manages a staff user through create, sign-in, edit, deactivate, reac
   await editDialog.getByLabel('Name').fill(userNameEdited)
   await editDialog.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByRole('status').filter({ hasText: `${userNameEdited} was updated.` })).toBeVisible()
+
+  await chooseRowAction(page, userNameEdited, 'View profile')
+  const activityDialog = page.getByRole('dialog', { name: `${userNameEdited} profile` })
+  const activity = activityDialog.getByRole('region', { name: 'Account activity' })
+  await expect(activity).toContainText('Account created')
+  await expect(activity).toContainText('Changed their password')
+  await expect(activity).toContainText(`name: ${userName} → ${userNameEdited}`)
+  await expect(activity).toContainText(`by ${admin.name}`)
+  await activityDialog.getByRole('button', { name: 'Close', exact: true }).click()
 
   await chooseRowAction(page, userNameEdited, 'Deactivate user')
   const deactivateDialog = page.getByRole('dialog', { name: 'Deactivate user?' })
@@ -137,13 +161,23 @@ test('Admin cannot delete a user with history or remove their own access', async
   const ownTrigger = rowFor(page, admin.name).getByRole('button', { name: `Actions for ${admin.name}` })
   await ownTrigger.focus()
   await ownTrigger.press('Enter')
+  await expect(page.getByRole('menuitem', { name: 'Reset password', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: 'Deactivate user', exact: true })).toBeDisabled()
   await expect(page.getByRole('menuitem', { name: 'Delete user', exact: true })).toBeDisabled()
   await page.keyboard.press('Escape')
 
-  // Deactivating an assigned Leader is allowed; Life Groups then flags the group for reassignment.
+  // Deactivating an assigned Leader is allowed once the Admin explicitly chooses to reassign later;
+  // Life Groups then flags the group for reassignment.
   await chooseRowAction(page, leader.name, 'Deactivate user')
-  await page.getByRole('dialog', { name: 'Deactivate user?' }).getByRole('button', { name: 'Deactivate user' }).click()
+  const confirmDialog = page.getByRole('dialog', { name: 'Deactivate user?' })
+  const confirmButton = confirmDialog.getByRole('button', { name: 'Deactivate user' })
+  const newLeader = confirmDialog.getByLabel('New Leader')
+  const reassignLater = `Reassign later — leave ${lifeGroup.name} without a Leader for now`
+  await expect(newLeader.getByRole('option', { name: reassignLater })).toHaveCount(1)
+  // With other unassigned Leaders available, nothing is preselected and Deactivate waits for a choice.
+  if ((await newLeader.inputValue()) === '') await expect(confirmButton).toBeDisabled()
+  await newLeader.selectOption({ label: reassignLater })
+  await confirmButton.click()
   await expect(page.getByRole('status').filter({ hasText: `${leader.name} was deactivated.` })).toBeVisible()
 
   await page.getByRole('link', { name: 'Life Groups', exact: true }).click()
@@ -151,4 +185,44 @@ test('Admin cannot delete a user with history or remove their own access', async
   const warning = page.getByRole('status').filter({ hasText: /needs? a new Leader/ })
   await expect(warning).toContainText(`${lifeGroup.name}: leader is deactivated (${leader.name})`)
   await expect(rowFor(page, lifeGroup.name)).toContainText('Needs new Leader · Leader is deactivated')
+
+  // Admins change their own password on My profile; this device stays signed in.
+  await page.goto('/profile')
+  await page.getByRole('button', { name: 'Change password' }).click()
+  const passwordDialog = page.getByRole('dialog', { name: 'Change your password' })
+  const ownNewPassword = 'Profile4Horizon'
+  await passwordDialog.getByLabel('Current password').fill(admin.password)
+  await passwordDialog.getByLabel(/^New password/).fill(ownNewPassword)
+  await passwordDialog.getByLabel('Confirm new password').fill(ownNewPassword)
+  await passwordDialog.getByRole('button', { name: 'Change password' }).click()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Password changed. Other devices were signed out.' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'My profile' })).toBeVisible()
+  admin.password = ownNewPassword
+})
+
+test('Admin hands a Life Group to another Leader while deactivating its Leader', async ({ page }) => {
+  const admin = await fixtures.createUser('handover-admin', 'admin')
+  const leader = await fixtures.createUser('handover-leader', 'leader')
+  const successor = await fixtures.createUser('handover-successor', 'leader')
+  const lifeGroup = await fixtures.createLifeGroupFor(leader.id, 'Handover Group')
+
+  await login(page, admin)
+  await openUsers(page)
+  await searchUsers(page, fixtures.runId)
+  await chooseRowAction(page, leader.name, 'Deactivate user')
+  const deactivateDialog = page.getByRole('dialog', { name: 'Deactivate user?' })
+  const newLeader = deactivateDialog.getByLabel('New Leader')
+  await expect(newLeader.getByRole('option', { name: successor.name })).toHaveCount(1)
+  await expect(newLeader.getByRole('option', { name: leader.name })).toHaveCount(0)
+  await newLeader.selectOption({ label: successor.name })
+  await deactivateDialog.getByRole('button', { name: 'Deactivate user' }).click()
+  await expect(
+    page.getByRole('status').filter({ hasText: `${lifeGroup.name} is now led by ${successor.name}.` }),
+  ).toBeVisible()
+
+  await page.getByRole('link', { name: 'Life Groups', exact: true }).click()
+  await expect(rowFor(page, lifeGroup.name)).toContainText(successor.name)
+  await expect(rowFor(page, lifeGroup.name)).not.toContainText('Needs new Leader')
 })

@@ -13,10 +13,11 @@ import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { RowActionsMenu, type RowAction } from '../components/ui/RowActionsMenu'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, closeHarvestEvent, closeSundayService, createHarvestEvent, createSundayService, getHarvestEvents, getSundayServices, updateHarvestEvent, updateSundayService, type HarvestEvent, type HarvestEventInput, type SundayService, type SundayServiceInput } from '../lib/api'
+import { formatCalendarDate } from '../lib/dates'
 import { getAccessToken as token } from '../lib/session'
 
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Event data is unavailable right now.' }
-function formatDate(value: string) { return new Intl.DateTimeFormat('en-PH', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) }
+const formatDate = formatCalendarDate
 
 type Directory = 'service' | 'harvest'
 type ClosingEvent = { event: HarvestEvent; type: 'harvest' } | { event: SundayService; type: 'service' }

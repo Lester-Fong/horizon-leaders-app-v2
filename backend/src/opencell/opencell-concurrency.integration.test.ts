@@ -15,10 +15,13 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const describeLocal = supabaseUrl && serviceRoleKey ? describe : describe.skip;
 
+// describe.skip still runs this callback while collecting, so the client needs safe fallbacks.
 describeLocal("OpenCell concurrency with local Supabase", () => {
-  const client = createClient<Database>(supabaseUrl!, serviceRoleKey!, {
-    auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
-  });
+  const client = createClient<Database>(
+    supabaseUrl ?? "http://127.0.0.1:54321",
+    serviceRoleKey ?? "integration-key-unavailable",
+    { auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false } },
+  );
   const userIds: string[] = [];
   const lifeGroupIds: string[] = [];
   const memberIds: string[] = [];

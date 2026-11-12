@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
 import { CHURCH_TIME_ZONE } from "../config/constants.js";
-import type { Database, Tables } from "../types/database.types.js";
+import type { Database } from "../types/database.overrides.js";
+import type { Tables } from "../types/database.types.js";
 import { FOLLOW_UP_REASON_LABELS, type FollowUpReason } from "../follow-ups/types.js";
 import {
   DashboardServiceError,

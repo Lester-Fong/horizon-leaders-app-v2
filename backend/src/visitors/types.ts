@@ -1,4 +1,5 @@
 import type { HorizonActor } from "../auth/types.js";
+import type { Page, PageRequest } from "../http/pagination.js";
 import type { Member } from "../members/types.js";
 import type { Enums } from "../types/database.types.js";
 
@@ -92,7 +93,14 @@ export interface VisitorService {
   ): Promise<VisitorConversionResult>;
   create(input: VisitorInput): Promise<Visitor>;
   getById(actor: HorizonActor, visitorId: string): Promise<Visitor>;
+  /** Every matching Visitor, read in batches so nothing is cut at the row cap. */
   list(actor: HorizonActor, options: ListVisitorsOptions): Promise<Visitor[]>;
+  /** One page of matching Visitors after scope and search, with the exact total. */
+  listPage(
+    actor: HorizonActor,
+    options: ListVisitorsOptions,
+    page: PageRequest,
+  ): Promise<Page<Visitor>>;
   setLifeGroup(
     actor: HorizonActor,
     visitorId: string,

@@ -185,10 +185,21 @@ describeWithLocalSupabase("Ministry API with local Supabase", () => {
     expect(adminDefault.body.data).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: archivedMinistryId })]),
     );
-    expect(adminArchived.body.data).toEqual([
+    // Scope list assertions to this test's fixtures so pre-existing local/demo
+    // Ministries do not affect the result.
+    const fixtureMinistryIds = new Set([activeMinistryId, archivedMinistryId]);
+    const ownFixtures = (body: { data: Array<{ id: string }> }) =>
+      body.data.filter(({ id }) => fixtureMinistryIds.has(id));
+    expect(adminArchived.body.data.every(({ isActive }: { isActive: boolean }) => !isActive)).toBe(
+      true,
+    );
+    expect(ownFixtures(adminArchived.body)).toEqual([
       expect.objectContaining({ id: archivedMinistryId, isActive: false }),
     ]);
-    expect(leaderList.body.data).toEqual([
+    expect(leaderList.body.data.every(({ isActive }: { isActive: boolean }) => isActive)).toBe(
+      true,
+    );
+    expect(ownFixtures(leaderList.body)).toEqual([
       expect.objectContaining({ id: activeMinistryId, isActive: true }),
     ]);
     expect(

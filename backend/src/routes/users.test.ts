@@ -42,11 +42,13 @@ function createAuthService(): AuthService {
 
 function createUserService(): UserService {
   return {
-    create: vi.fn(async ({ email, name, role }) => ({ ...user, email, name, role })),
+    changeOwnPassword: vi.fn(async (actor) => ({ id: actor.id })),
+    create: vi.fn(async (_actor, { email, name, role }) => ({ ...user, email, name, role })),
     delete: vi.fn(async (_actor, id) => ({ id })),
     getById: vi.fn(async () => user),
     list: vi.fn(async () => [user]),
-    resetPassword: vi.fn(async (id) => ({ id })),
+    listActivity: vi.fn(async () => []),
+    resetPassword: vi.fn(async (_actor, id) => ({ id })),
     setActive: vi.fn(async (_actor, _id, isActive) => ({ ...user, isActive })),
     update: vi.fn(async (_actor, _id, input) => ({ ...user, ...input })),
   };
@@ -165,7 +167,7 @@ describe("Users API mutations", () => {
 
     expect(response.status).toBe(201);
     expect(response.body.data).not.toHaveProperty("password");
-    expect(userService.create).toHaveBeenCalledWith({
+    expect(userService.create).toHaveBeenCalledWith(actors.admin, {
       email: "new.leader@example.test",
       name: "New Leader",
       password: strongPassword,
@@ -238,7 +240,7 @@ describe("Users API mutations", () => {
     expect(password.body.data).toEqual({ id: userId });
     expect(weak.status).toBe(422);
     expect(weak.body.error.code).toBe("WEAK_PASSWORD");
-    expect(userService.resetPassword).toHaveBeenCalledOnce();
+    expect(userService.resetPassword).toHaveBeenCalledWith(actors.admin, userId, strongPassword);
     expect(removed.status).toBe(200);
     expect(userService.delete).toHaveBeenCalledWith(actors.admin, userId);
   });
@@ -264,5 +266,119 @@ describe("Users API mutations", () => {
     expect(failure.status).toBe(500);
     expect(failure.body.error.code).toBe("USER_SERVICE_UNAVAILABLE");
     expect(JSON.stringify(failure.body)).not.toContain("raw failure");
+  });
+});
+
+describe("Own password and account activity", () => {
+  it("lets any signed-in user change their own password", async () => {
+    const { app, userService } = createTestApp();
+
+    const changed = await request(app)
+      .put("/api/me/password")
+      .set(asLeader)
+      .send({ currentPassword: "OldPassword1", newPassword: strongPassword });
+    const weak = await request(app)
+      .put("/api/me/password")
+      .set(asLeader)
+      .send({ currentPassword: "OldPassword1", newPassword: "weak" });
+    const extraField = await request(app)
+      .put("/api/me/password")
+      .set(asLeader)
+      .send({ currentPassword: "OldPassword1", newPassword: strongPassword, userId });
+
+    expect(changed.status).toBe(200);
+    expect(userService.changeOwnPassword).toHaveBeenCalledWith(
+      actors.leader,
+      "OldPassword1",
+      strongPassword,
+    );
+    expect(weak.status).toBe(422);
+    expect(extraField.status).toBe(400);
+  });
+
+  it("limits repeated own-password attempts", async () => {
+    const userService = createUserService();
+    vi.mocked(userService.changeOwnPassword).mockRejectedValue(
+      new UserServiceError(422, "CURRENT_PASSWORD_INCORRECT", "Incorrect."),
+    );
+    const { app } = createTestApp(userService);
+    const statuses: number[] = [];
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await request(app)
+        .put("/api/me/password")
+        .set(asLeader)
+        .send({ currentPassword: "Wrong1Password", newPassword: strongPassword });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 5)).toEqual([422, 422, 422, 422, 422]);
+    expect(statuses[5]).toBe(429);
+    expect(userService.changeOwnPassword).toHaveBeenCalledTimes(5);
+  });
+
+  it("returns account activity to Admins only", async () => {
+    const { app, userService } = createTestApp();
+
+    const asAdminResponse = await request(app).get(`/api/users/${userId}/activity`).set(asAdmin);
+    const asLeaderResponse = await request(app).get(`/api/users/${userId}/activity`).set(asLeader);
+    const badId = await request(app).get("/api/users/not-a-uuid/activity").set(asAdmin);
+
+    expect(asAdminResponse.status).toBe(200);
+    expect(asAdminResponse.body.data).toEqual([]);
+    expect(userService.listActivity).toHaveBeenCalledWith(userId);
+    expect(asLeaderResponse.status).toBe(403);
+    expect(badId.status).toBe(400);
+  });
+});
+
+describe("Users API pagination", () => {
+  function createManyUsers(count: number): ManagedUser[] {
+    return Array.from({ length: count }, (_, index) => ({
+      ...user,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      name: `User ${String(index).padStart(3, "0")}`,
+    }));
+  }
+
+  it("pages the filtered list in memory and reports meta", async () => {
+    const userService = createUserService();
+    const users = createManyUsers(132);
+    vi.mocked(userService.list).mockResolvedValue(users);
+    const { app } = createTestApp(userService);
+
+    const response = await request(app)
+      .get("/api/users?status=all&search=user&limit=50&offset=100")
+      .set(asAdmin);
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta).toEqual({ hasMore: false, limit: 50, offset: 100, total: 132 });
+    expect(response.body.data).toHaveLength(32);
+    expect(response.body.data[0].id).toBe(users[100]?.id);
+    expect(userService.list).toHaveBeenCalledWith({ search: "user", status: "all" });
+  });
+
+  it("returns hasMore while rows remain and the plain list without a limit", async () => {
+    const userService = createUserService();
+    vi.mocked(userService.list).mockResolvedValue(createManyUsers(132));
+    const { app } = createTestApp(userService);
+
+    const firstPage = await request(app).get("/api/users?limit=50").set(asAdmin);
+    const fullList = await request(app).get("/api/users").set(asAdmin);
+
+    expect(firstPage.body.meta).toEqual({ hasMore: true, limit: 50, offset: 0, total: 132 });
+    expect(fullList.body.data).toHaveLength(132);
+    expect(fullList.body).not.toHaveProperty("meta");
+  });
+
+  it("rejects invalid limit and offset values", async () => {
+    const { app, userService } = createTestApp();
+
+    for (const query of ["limit=0", "limit=101", "limit=ten", "limit=5&offset=-5", "offset=5"]) {
+      const response = await request(app).get(`/api/users?${query}`).set(asAdmin);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("INVALID_REQUEST");
+    }
+    expect(userService.list).not.toHaveBeenCalled();
   });
 });

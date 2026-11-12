@@ -13,7 +13,10 @@ import {
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 import { useAuth } from '../auth/useAuth'
+import { DeactivateUserDialog } from '../components/users/DeactivateUserDialog'
+import { getLedActiveGroup } from '../components/users/ledLifeGroup'
 import { ResetPasswordModal } from '../components/users/ResetPasswordModal'
+import { UserActivityList } from '../components/users/UserActivityList'
 import { UserProfileDetails } from '../components/users/UserProfileDetails'
 import { UserFormModal, type UserFormContext } from '../components/users/UserFormModal'
 import { Button } from '../components/ui/Button'
@@ -24,6 +27,7 @@ import {
   LoadingState,
 } from '../components/ui/Feedback'
 import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -34,7 +38,8 @@ import {
   createUser,
   deleteUser,
   getUser,
-  getUsers,
+  getUsersPage,
+  reassignLifeGroupLeader,
   resetUserPassword,
   setUserActive,
   updateUser,
@@ -43,7 +48,9 @@ import {
   type UpdateUserInput,
   type UserListStatus,
 } from '../lib/api'
+import { formatTimestampDate } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
+import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -52,19 +59,15 @@ function getErrorMessage(error: unknown) {
 
 function formatLastSignIn(value: string | null) {
   if (!value) return 'Never'
-  return new Date(value).toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  return formatTimestampDate(value)
 }
 
 function matchesStatus(user: ManagedUser, status: UserListStatus) {
   return status === 'all' || user.isActive === (status === 'active')
 }
 
-function sortUsers(users: ManagedUser[]) {
-  return [...users].sort((left, right) => left.name.localeCompare(right.name))
+function compareUsers(left: ManagedUser, right: ManagedUser) {
+  return left.name.localeCompare(right.name)
 }
 
 function lifeGroupWarning(user: ManagedUser) {
@@ -75,7 +78,15 @@ function lifeGroupWarning(user: ManagedUser) {
 
 export function UsersPage() {
   const { actor } = useAuth()
-  const [users, setUsers] = useState<ManagedUser[]>([])
+  const userList = usePagedList<ManagedUser>(getErrorMessage)
+  const {
+    insertSorted: insertUser,
+    items: users,
+    loadMore,
+    removeItem: removeUserRow,
+    replace: replaceUsers,
+    updateItems: updateUsers,
+  } = userList
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -91,6 +102,12 @@ export function UsersPage() {
   const [profileUser, setProfileUser] = useState<ManagedUser | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
 
+  /** Opens the deactivate dialog; it loads possible successors for a group Leader itself. */
+  function openDeactivate(user: ManagedUser) {
+    setActionError(null)
+    setDeactivateTarget(user)
+  }
+
   /** Opens the read-only profile with the row's data, then refreshes it from the server. */
   async function openProfile(user: ManagedUser) {
     setProfileUser(user)
@@ -103,18 +120,29 @@ export function UsersPage() {
     }
   }
 
+  // Changing search or status reloads from the first page.
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
     try {
       const token = await getAccessToken()
-      setUsers(await getUsers(token, { search, status: statusFilter }))
+      replaceUsers(
+        await getUsersPage(token, { search, status: statusFilter }, DIRECTORY_FIRST_PAGE),
+      )
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [search, statusFilter])
+  }, [replaceUsers, search, statusFilter])
+
+  const loadMoreUsers = useCallback(
+    () =>
+      loadMore(async (page) =>
+        getUsersPage(await getAccessToken(), { search, status: statusFilter }, page),
+      ),
+    [loadMore, search, statusFilter],
+  )
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => void loadData(), 0)
@@ -131,12 +159,19 @@ export function UsersPage() {
     setSearch('')
   }
 
-  /** Replaces or removes a row in place, respecting the current status filter. */
+  /** Replaces, adds, or removes a row in place, respecting the current status filter. */
   function applyUser(updated: ManagedUser) {
-    setUsers((current) => {
-      const others = current.filter((user) => user.id !== updated.id)
-      return matchesStatus(updated, statusFilter) ? sortUsers([...others, updated]) : others
-    })
+    if (!matchesStatus(updated, statusFilter)) {
+      removeUserRow(updated.id)
+    } else if (users.some((user) => user.id === updated.id)) {
+      updateUsers((current) =>
+        current
+          .map((user) => (user.id === updated.id ? updated : user))
+          .sort(compareUsers),
+      )
+    } else {
+      insertUser(updated, compareUsers)
+    }
   }
 
   async function saveUser(input: CreateUserInput) {
@@ -146,7 +181,8 @@ export function UsersPage() {
     const existing = formContext.user
     const update: UpdateUserInput = {}
     if (input.name !== existing.name) update.name = input.name
-    if (input.email !== existing.email) update.email = input.email
+    // Admins cannot change their own sign-in email here; the server rejects it too.
+    if (input.email !== existing.email && existing.id !== actor?.id) update.email = input.email
     if (input.role !== existing.role) update.role = input.role
     if (Object.keys(update).length === 0) return existing
     return updateUser(token, existing.id, update)
@@ -166,17 +202,25 @@ export function UsersPage() {
     )
   }
 
-  async function changeStatus(user: ManagedUser, isActive: boolean) {
+  async function changeStatus(user: ManagedUser, isActive: boolean, replacementId = '') {
     setChangingUserId(user.id)
     setNotice(null)
     setActionError(null)
     try {
-      const updated = await setUserActive(await getAccessToken(), user.id, isActive)
+      const accessToken = await getAccessToken()
+      const ledGroup = isActive ? null : getLedActiveGroup(user)
+      let handoverNotice = ''
+      if (ledGroup && replacementId) {
+        // Hand the group over first so it is never left without an active Leader.
+        const group = await reassignLifeGroupLeader(accessToken, ledGroup.id, replacementId)
+        handoverNotice = ` ${group.name} is now led by ${group.leader.name}.`
+      }
+      const updated = await setUserActive(accessToken, user.id, isActive)
       applyUser(updated)
       setDeactivateTarget(null)
       setNotice(
         `${updated.name} was ${updated.isActive ? 'reactivated' : 'deactivated'}.` +
-          (updated.isActive ? '' : lifeGroupWarning(updated)),
+          (updated.isActive ? '' : handoverNotice || lifeGroupWarning(updated)),
       )
     } catch (error) {
       setActionError(getErrorMessage(error))
@@ -191,7 +235,7 @@ export function UsersPage() {
     setActionError(null)
     try {
       await deleteUser(await getAccessToken(), user.id)
-      setUsers((current) => current.filter((currentUser) => currentUser.id !== user.id))
+      removeUserRow(user.id)
       setDeleteTarget(null)
       setNotice(`${user.name} was permanently deleted.`)
     } catch (error) {
@@ -220,6 +264,7 @@ export function UsersPage() {
         onSelect: () => openFormFor({ mode: 'edit', user }),
       },
       {
+        disabled: isSelf,
         icon: KeyRound,
         label: 'Reset password',
         onSelect: () => {
@@ -232,10 +277,7 @@ export function UsersPage() {
             disabled: isSelf,
             icon: UserX,
             label: 'Deactivate user',
-            onSelect: () => {
-              setActionError(null)
-              setDeactivateTarget(user)
-            },
+            onSelect: () => openDeactivate(user),
           }
         : {
             icon: UserCheck,
@@ -294,7 +336,7 @@ export function UsersPage() {
           </div>
           {!isLoading && (
             <p className="font-mono text-xs text-muted" aria-live="polite">
-              {users.length} {users.length === 1 ? 'User' : 'Users'}
+              {userList.total} {userList.total === 1 ? 'User' : 'Users'}
             </p>
           )}
         </div>
@@ -428,6 +470,18 @@ export function UsersPage() {
         </ResponsiveTable>
       )}
 
+      {!isLoading && users.length > 0 && (
+        <LoadMoreFooter
+          error={userList.loadMoreError}
+          hasMore={userList.hasMore}
+          isLoading={userList.isLoadingMore}
+          label="Users"
+          onLoadMore={() => void loadMoreUsers()}
+          shown={users.length}
+          total={userList.total}
+        />
+      )}
+
       {formContext && (
         <UserFormModal
           key={formContext.mode === 'edit' ? formContext.user.id : 'create'}
@@ -452,6 +506,7 @@ export function UsersPage() {
           </FeedbackBanner>
         )}
         {profileUser && <UserProfileDetails user={profileUser} />}
+        {profileUser && <UserActivityList key={profileUser.id} userId={profileUser.id} />}
         <div className="mt-6 flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={() => setProfileUser(null)}>
             Close
@@ -485,49 +540,18 @@ export function UsersPage() {
         />
       )}
 
-      <Modal
-        className="max-w-md"
-        isOpen={Boolean(deactivateTarget)}
-        onClose={() => setDeactivateTarget(null)}
-        preventClose={Boolean(changingUserId)}
-        title="Deactivate user?"
-        description={
-          deactivateTarget
-            ? `${deactivateTarget.name} will lose access to Horizon immediately. Their history is kept and an Admin can reactivate them later.`
-            : undefined
-        }
-      >
-        {deactivateTarget?.role === 'leader' && deactivateTarget.assignedLifeGroup && (
-          <FeedbackBanner className="mb-5" tone="warning" title="Life Group reassignment needed">
-            {deactivateTarget.name} leads {deactivateTarget.assignedLifeGroup.name}. Reassign it
-            to an active Leader in Life Groups after deactivating.
-          </FeedbackBanner>
-        )}
-        {actionError && (
-          <FeedbackBanner className="mb-5" tone="error">
-            {actionError}
-          </FeedbackBanner>
-        )}
-        <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
-          <Button
-            variant="secondary"
-            disabled={Boolean(changingUserId)}
-            onClick={() => setDeactivateTarget(null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            isLoading={Boolean(changingUserId)}
-            onClick={() => {
-              if (deactivateTarget) void changeStatus(deactivateTarget, false)
-            }}
-          >
-            <UserX aria-hidden="true" className="size-4" />
-            Deactivate user
-          </Button>
-        </div>
-      </Modal>
+      {deactivateTarget && (
+        <DeactivateUserDialog
+          key={deactivateTarget.id}
+          user={deactivateTarget}
+          error={actionError}
+          isSubmitting={Boolean(changingUserId)}
+          onClose={() => setDeactivateTarget(null)}
+          onConfirm={(replacementLeaderId) =>
+            void changeStatus(deactivateTarget, false, replacementLeaderId)
+          }
+        />
+      )}
 
       <Modal
         className="max-w-md"
