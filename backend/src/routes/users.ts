@@ -32,6 +32,8 @@ const MAX_NAME_LENGTH = 120;
 const MAX_SEARCH_LENGTH = 100;
 const CREATE_FIELDS = new Set(["email", "name", "password", "role"]);
 const UPDATE_FIELDS = new Set(["email", "name", "role"]);
+/** Audit log rows returned when the client does not send a limit. */
+const AUDIT_LOG_DEFAULT_PAGE_SIZE = 50;
 const STATUSES = new Set<UserListStatus>(["active", "all", "deleted", "inactive"]);
 
 const handleRequest = createRequestHandler(UserServiceError, {
@@ -161,6 +163,22 @@ export function createUsersRouter(
       });
       if (!page) return users;
       const { items, meta } = pageFromArray(users, page);
+      return new PagedData(items, meta);
+    });
+  });
+
+  // Registered before /users/:userId so "audit-events" is never read as a User ID.
+  router.get("/users/audit-events", ...adminOnly, async (request, response) => {
+    const pagination = readPageRequest(request.query);
+    if (!pagination.ok) {
+      sendInvalid(response, pagination.message);
+      return;
+    }
+
+    const page = pagination.page ?? { limit: AUDIT_LOG_DEFAULT_PAGE_SIZE, offset: 0 };
+    response.set("Cache-Control", "private, no-store");
+    await handleRequest(response, async () => {
+      const { items, meta } = await userService.listAuditPage(page);
       return new PagedData(items, meta);
     });
   });

@@ -297,6 +297,7 @@ const unavailableUserService: UserService = {
   getById: async () => unavailableUser(),
   list: async () => unavailableUser(),
   listActivity: async () => unavailableUser(),
+  listAuditPage: async () => unavailableUser(),
   resetPassword: async () => unavailableUser(),
   setActive: async () => unavailableUser(),
   update: async () => unavailableUser(),

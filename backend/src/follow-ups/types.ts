@@ -31,6 +31,21 @@ export interface FollowUp {
   subject: FollowUpSubject;
 }
 
+/**
+ * Optional narrowing of the shared Follow Up list. Filters never widen or
+ * change who may read Follow Ups; every authenticated staff user still reads
+ * the shared list.
+ */
+export interface FollowUpListFilters {
+  /** Inclusive Asia/Manila calendar date (YYYY-MM-DD) on created (active) or completed (History) time. */
+  fromDate?: string;
+  /** Members whose current Life Group, or Visitors whose current affiliation, is this group. */
+  lifeGroup?: { lifeGroupId: string; type: "lifeGroup" } | { type: "mine" };
+  reason?: FollowUpReason;
+  /** Inclusive Asia/Manila calendar date (YYYY-MM-DD). */
+  toDate?: string;
+}
+
 export interface SundayAbsenceFollowUpContext {
   qualifyingServiceIds: string[];
   threshold: number;
@@ -60,12 +75,17 @@ export interface FollowUpService {
     completionNote: string | null,
   ): Promise<FollowUp>;
   /** Every Follow Up with this status, read in batches past the row cap. */
-  list(actor: HorizonActor, status: FollowUpStatus): Promise<FollowUp[]>;
+  list(
+    actor: HorizonActor,
+    status: FollowUpStatus,
+    filters?: FollowUpListFilters,
+  ): Promise<FollowUp[]>;
   /** One page of Follow Ups with this status, with the exact total. */
   listPage(
     actor: HorizonActor,
     status: FollowUpStatus,
     page: PageRequest,
+    filters?: FollowUpListFilters,
   ): Promise<Page<FollowUp>>;
   triggerSundayAbsence(
     memberId: string,

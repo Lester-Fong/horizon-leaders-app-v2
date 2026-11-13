@@ -9,6 +9,7 @@ interface RecordedQuery {
 }
 
 interface QueryResult {
+  count?: number | null;
   data: unknown;
   error: unknown;
 }
@@ -85,6 +86,8 @@ function profileRow(id: string, name: string) {
 
 function setupFakeSupabase({
   activityRows = [],
+  auditTotal = activityRows.length,
+  auditError = null,
   profileListRows = [],
   profileOverrides = {},
   profileUpdateError = null,
@@ -92,6 +95,8 @@ function setupFakeSupabase({
   rpc = async () => ({ data: null, error: null }),
 }: {
   activityRows?: unknown[];
+  auditError?: unknown;
+  auditTotal?: number;
   profileListRows?: unknown[];
   profileOverrides?: Partial<ReturnType<typeof profileRow>>;
   profileUpdateError?: unknown;
@@ -106,6 +111,11 @@ function setupFakeSupabase({
       if (hasOperation(query, "insert")) {
         events.push("audit");
         return { data: null, error: null };
+      }
+      if (hasOperation(query, "range")) {
+        return auditError
+          ? { data: null, error: auditError }
+          : { count: auditTotal, data: activityRows, error: null };
       }
       return { data: activityRows, error: null };
     }
@@ -301,6 +311,73 @@ describe("Supabase User service safeguards", () => {
 
     const activity = await service.listActivity(userId);
     expect(activity.map((event) => event.id)).toEqual(["event-1"]);
+  });
+
+  describe("audit log page", () => {
+    const auditRow = {
+      actor_name: "Ada Admin",
+      actor_profile_id: adminId,
+      created_at: "2026-11-02T00:00:00.000Z",
+      details: { changes: { role: { from: "leader", to: "admin" } } },
+      target_name: "Lee Leader",
+      target_user_id: userId,
+    };
+
+    it("reads one newest-first window with an exact total", async () => {
+      const { queries, service } = setupFakeSupabase({
+        activityRows: [
+          { ...auditRow, action: "user_updated", id: "event-2" },
+          { ...auditRow, action: "future_action", id: "event-1" },
+        ],
+        auditTotal: 7,
+      });
+
+      const page = await service.listAuditPage({ limit: 2, offset: 4 });
+
+      expect(page.items.map((event) => event.id)).toEqual(["event-2"]);
+      expect(page.items[0]).toMatchObject({
+        action: "user_updated",
+        actorName: "Ada Admin",
+        details: { changes: { role: { from: "leader", to: "admin" } } },
+        targetName: "Lee Leader",
+      });
+      // The skipped unknown action still counts as a read row, so paging stays aligned.
+      expect(page.meta).toEqual({ hasMore: true, limit: 2, offset: 4, total: 7 });
+
+      const [query] = queries.filter((recorded) => recorded.table === "user_audit_events");
+      expect(query?.operations).toContainEqual({
+        args: [expect.any(String), { count: "exact" }],
+        method: "select",
+      });
+      expect(query?.operations).toContainEqual({
+        args: ["created_at", { ascending: false }],
+        method: "order",
+      });
+      expect(query?.operations).toContainEqual({ args: ["id", { ascending: false }], method: "order" });
+      expect(query?.operations).toContainEqual({ args: [4, 5], method: "range" });
+      // The log is global: no per-user filter is applied.
+      expect(hasOperation(query!, "or")).toBe(false);
+      expect(hasOperation(query!, "eq")).toBe(false);
+    });
+
+    it("reports the last page when no rows remain", async () => {
+      const { service } = setupFakeSupabase({
+        activityRows: [{ ...auditRow, action: "user_created", id: "event-1" }],
+        auditTotal: 3,
+      });
+
+      const page = await service.listAuditPage({ limit: 2, offset: 2 });
+      expect(page.meta).toEqual({ hasMore: false, limit: 2, offset: 2, total: 3 });
+    });
+
+    it("hides database errors behind a service-unavailable error", async () => {
+      const { service } = setupFakeSupabase({ auditError: { message: "boom" } });
+
+      await expect(service.listAuditPage({ limit: 10, offset: 0 })).rejects.toMatchObject({
+        code: "USER_SERVICE_UNAVAILABLE",
+        status: 500,
+      });
+    });
   });
 
   describe("soft delete", () => {

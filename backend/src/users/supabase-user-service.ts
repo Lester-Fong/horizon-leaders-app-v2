@@ -4,7 +4,8 @@ import { createClient, type User } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
 import { USER_ACTIVITY_LIMIT } from "../config/constants.js";
-import { fetchAllRows } from "../db/range-queries.js";
+import { fetchAllRows, fetchRowPage } from "../db/range-queries.js";
+import { buildPageMeta } from "../http/pagination.js";
 import type { Database, Json, Tables, TablesUpdate } from "../types/database.types.js";
 import {
   DELETED_EMAIL_DOMAIN,
@@ -168,6 +169,37 @@ function isUserActivityAction(value: string): value is UserActivityAction {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type AuditRow = Pick<
+  Tables<"user_audit_events">,
+  | "action"
+  | "actor_name"
+  | "actor_profile_id"
+  | "created_at"
+  | "details"
+  | "id"
+  | "target_name"
+  | "target_user_id"
+>;
+
+function toActivityEvents(rows: AuditRow[]): UserActivityEvent[] {
+  return rows.flatMap((row): UserActivityEvent[] => {
+    // Skip actions this API version does not know rather than mislabel them.
+    if (!isUserActivityAction(row.action)) return [];
+    return [
+      {
+        action: row.action,
+        actorId: row.actor_profile_id,
+        actorName: row.actor_name,
+        createdAt: row.created_at,
+        details: isRecord(row.details) ? row.details : {},
+        id: row.id,
+        targetName: row.target_name,
+        targetUserId: row.target_user_id,
+      },
+    ];
+  });
 }
 
 export function createSupabaseUserService({
@@ -380,22 +412,22 @@ export function createSupabaseUserService({
 
       if (error) throw serviceUnavailable();
 
-      return data.flatMap((row): UserActivityEvent[] => {
-        // Skip actions this API version does not know rather than mislabel them.
-        if (!isUserActivityAction(row.action)) return [];
-        return [
-          {
-            action: row.action,
-            actorId: row.actor_profile_id,
-            actorName: row.actor_name,
-            createdAt: row.created_at,
-            details: isRecord(row.details) ? row.details : {},
-            id: row.id,
-            targetName: row.target_name,
-            targetUserId: row.target_user_id,
-          },
-        ];
-      });
+      return toActivityEvents(data);
+    },
+
+    async listAuditPage(page) {
+      const { data, error } = await fetchRowPage(
+        (countOptions) =>
+          supabase
+            .from("user_audit_events")
+            .select(AUDIT_COLUMNS, countOptions)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false }),
+        page,
+      );
+      if (error) throw serviceUnavailable();
+      const items = toActivityEvents(data.rows);
+      return { items, meta: buildPageMeta(page, data.total, data.rows.length) };
     },
 
     async create(actor, input) {

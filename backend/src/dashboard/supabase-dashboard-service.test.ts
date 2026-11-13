@@ -8,14 +8,15 @@ const admin: HorizonActor = { id: "55555555-5555-4555-8555-555555555555", isActi
 const unassignedLeader: HorizonActor = { id: "66666666-6666-4666-8666-666666666666", isActive: true, name: "Una Leader", role: "leader" };
 
 /** Serves fixed rows per table or RPC, ignoring filters; HEAD count requests get an empty body. */
-function createDashboardFetch(rows: Record<string, unknown[]>) {
+function createDashboardFetch(rows: Record<string, unknown[]>, counts: Record<string, number> = {}) {
   const requests: URL[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     requests.push(url);
-    const headers = { "Content-Range": "*/0", "Content-Type": "application/json" };
+    const table = url.pathname.split("/").at(-1) ?? "";
+    const headers = { "Content-Range": `*/${counts[table] ?? 0}`, "Content-Type": "application/json" };
     if (init?.method === "HEAD") return new Response(null, { headers, status: 200 });
-    const data = rows[url.pathname.split("/").at(-1) ?? ""] ?? [];
+    const data = rows[table] ?? [];
     if (new Headers(init?.headers).get("Accept")?.includes("vnd.pgrst.object")) {
       return new Response(JSON.stringify(data[0] ?? null), { headers, status: 200 });
     }
@@ -24,8 +25,8 @@ function createDashboardFetch(rows: Record<string, unknown[]>) {
   return { fetchImpl, requests };
 }
 
-function createService(rows: Record<string, unknown[]> = {}) {
-  const fake = createDashboardFetch(rows);
+function createService(rows: Record<string, unknown[]> = {}, counts: Record<string, number> = {}) {
+  const fake = createDashboardFetch(rows, counts);
   const service = createSupabaseDashboardService({ fetchImpl: fake.fetchImpl, serviceRoleKey: "test-service-role-key", supabaseUrl: "http://postgrest.test" });
   return { ...fake, service };
 }
@@ -71,5 +72,60 @@ describe("Supabase dashboard for a Leader without a Life Group", () => {
 
     expect(adminView.isUnassignedLeader).toBe(false);
     expect(leaderView.isUnassignedLeader).toBe(false);
+  });
+});
+
+describe("Supabase dashboard automation status", () => {
+  const eventId = "88888888-8888-4888-8888-888888888888";
+  const failedRun = {
+    error_count: 1, error_summary: `${eventId}: boom`, finished_at: "2026-11-12T19:00:05Z", job_name: "sunday_reconciliation",
+    processed_count: 0, started_at: "2026-11-12T19:00:00Z", status: "failed",
+  };
+
+  it("gives an Admin the latest Sunday reconciliation run and the pending Services", async () => {
+    const { requests, service } = createService(
+      { automation_runs: [failedRun], events: [{ event_date: "2026-11-08", id: eventId, title: "Sunday Service" }] },
+      { events: 3 },
+    );
+
+    const dashboard = await service.get(admin, { period: "8" });
+
+    expect(dashboard.automation).toEqual({
+      lastRun: {
+        errorCount: 1, errorSummary: `${eventId}: boom`, finishedAt: "2026-11-12T19:00:05Z", jobName: "sunday_reconciliation",
+        processedCount: 0, startedAt: "2026-11-12T19:00:00Z", status: "failed",
+      },
+      pendingServiceCount: 3,
+      pendingServices: [{ date: "2026-11-08", eventId, title: "Sunday Service" }],
+    });
+    const runRequest = requests.find((url) => url.pathname.endsWith("/automation_runs"));
+    expect(runRequest?.searchParams.get("job_name")).toBe("eq.sunday_reconciliation");
+    expect(runRequest?.searchParams.get("order")).toBe("started_at.desc");
+    const pendingRequest = requests.find((url) => url.pathname.endsWith("/events") && url.searchParams.has("sunday_service_evaluations"));
+    expect(pendingRequest?.searchParams.get("sunday_service_evaluations")).toBe("is.null");
+    expect(pendingRequest?.searchParams.get("counts_for_absence")).toBe("eq.true");
+    expect(pendingRequest?.searchParams.get("status")).toBe("eq.closed");
+  });
+
+  it("reports no runs and nothing pending on an empty table", async () => {
+    const dashboard = await createService().service.get(admin, { period: "8" });
+
+    expect(dashboard.automation).toEqual({ lastRun: null, pendingServiceCount: 0, pendingServices: [] });
+  });
+
+  it("never queries or returns automation data for a Leader", async () => {
+    const { requests, service } = createService({ automation_runs: [failedRun], life_groups: [{ id: programmeId }] });
+
+    const dashboard = await service.get({ ...unassignedLeader, name: "Lead" }, { period: "8" });
+
+    expect(dashboard).not.toHaveProperty("automation");
+    expect(requests.some((url) => url.pathname.endsWith("/automation_runs"))).toBe(false);
+    expect(requests.some((url) => url.searchParams.has("sunday_service_evaluations"))).toBe(false);
+  });
+
+  it("fails safely on a run status the database does not define", async () => {
+    const { service } = createService({ automation_runs: [{ ...failedRun, status: "unknown" }] });
+
+    await expect(service.get(admin, { period: "8" })).rejects.toMatchObject({ code: "DASHBOARD_SERVICE_UNAVAILABLE", status: 500 });
   });
 });

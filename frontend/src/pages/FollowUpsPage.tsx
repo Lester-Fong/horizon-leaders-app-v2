@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
+import { useAuth } from '../auth/useAuth'
 import { Button } from '../components/ui/Button'
 import {
   EmptyState,
@@ -14,7 +15,8 @@ import {
   FeedbackBanner,
   LoadingState,
 } from '../components/ui/Feedback'
-import { FormField, TextArea } from '../components/ui/FormControls'
+import { FilteredEmptyState } from '../components/ui/FilteredEmptyState'
+import { FormField, Select, TextArea, TextInput } from '../components/ui/FormControls'
 import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -28,13 +30,39 @@ import {
   ApiError,
   completeFollowUp,
   getFollowUpsPage,
+  getLifeGroups,
   type FollowUp,
+  type FollowUpListFilters,
+  type FollowUpReason,
   type FollowUpStatus,
+  type LifeGroup,
 } from '../lib/api'
 import { formatTimestampDateTime } from '../lib/dates'
+import { readEnum, readUuid, useListSearchParams } from '../lib/listSearchParams'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
 import { usePageTitle } from '../lib/usePageTitle'
+
+const FOLLOW_UP_REASON_OPTIONS: readonly { label: string; value: FollowUpReason }[] = [
+  { label: 'Consecutive Sunday absences', value: 'consecutive_sunday_absence' },
+  { label: 'Attended most OpenCell sessions', value: 'opencell_high_participation' },
+  { label: 'Interested in Sunday Service', value: 'harvest_sunday_interest' },
+]
+const FOLLOW_UP_REASONS = FOLLOW_UP_REASON_OPTIONS.map((option) => option.value)
+const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const FOLLOW_UP_LIST_DEFAULTS = {
+  from: '',
+  lifeGroup: '',
+  lifeGroupId: '',
+  reason: '',
+  to: '',
+}
+
+/** Reads a YYYY-MM-DD filter date; anything else reads as ''. */
+function readCalendarDateParam(params: URLSearchParams, key: string) {
+  const value = params.get(key) ?? ''
+  return CALENDAR_DATE_PATTERN.test(value) ? value : ''
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof ApiError
@@ -98,6 +126,34 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 export function FollowUpsPage() {
   usePageTitle('Follow Up')
+  const { actor } = useAuth()
+  const isAdmin = actor?.role === 'admin'
+  const {
+    reset: resetFilters,
+    searchParams,
+    update: updateFilters,
+  } = useListSearchParams(FOLLOW_UP_LIST_DEFAULTS)
+  // Leaders may narrow only to their own Life Group; any-group filtering is Admin-only.
+  const reasonFilter = readEnum<FollowUpReason | ''>(searchParams, 'reason', FOLLOW_UP_REASONS, '')
+  const lifeGroupIdFilter = isAdmin ? readUuid(searchParams, 'lifeGroupId') : ''
+  const isMyLifeGroup = !isAdmin && searchParams.get('lifeGroup') === 'mine'
+  const fromFilter = readCalendarDateParam(searchParams, 'from')
+  const toFilter = readCalendarDateParam(searchParams, 'to')
+  const dateRangeError = fromFilter && toFilter && fromFilter > toFilter
+    ? 'The From date must be on or before the To date.'
+    : null
+  const hasFilters = Boolean(reasonFilter || lifeGroupIdFilter || isMyLifeGroup || fromFilter || toFilter)
+  // A stable key for the applied filters; null while the date range is invalid.
+  const filterKey = dateRangeError
+    ? null
+    : JSON.stringify({
+        ...(reasonFilter ? { reason: reasonFilter } : {}),
+        ...(lifeGroupIdFilter ? { lifeGroupId: lifeGroupIdFilter } : {}),
+        ...(isMyLifeGroup ? { lifeGroup: 'mine' } : {}),
+        ...(fromFilter ? { from: fromFilter } : {}),
+        ...(toFilter ? { to: toFilter } : {}),
+      } satisfies FollowUpListFilters)
+  const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [status, setStatus] = useState<FollowUpStatus>('active')
   const followUpList = usePagedList<FollowUp>(getErrorMessage)
   const { items: followUps, loadMore, replace: replaceFollowUps } = followUpList
@@ -111,33 +167,61 @@ export function FollowUpsPage() {
   const [completionNoteError, setCompletionNoteError] = useState<string | null>(null)
   const [isCompleting, setIsCompleting] = useState(false)
 
-  // Switching between Active and History reloads from the first page.
+  // Switching between Active and History, or changing a filter, reloads from the first page.
   const loadDirectory = useCallback(async () => {
+    if (filterKey === null) return
     setIsLoading(true)
     setLoadError(null)
     try {
       replaceFollowUps(
-        await getFollowUpsPage(await getAccessToken(), status, DIRECTORY_FIRST_PAGE),
+        await getFollowUpsPage(
+          await getAccessToken(),
+          status,
+          DIRECTORY_FIRST_PAGE,
+          JSON.parse(filterKey) as FollowUpListFilters,
+        ),
       )
     } catch (error) {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [replaceFollowUps, status])
+  }, [filterKey, replaceFollowUps, status])
 
   const loadMoreFollowUps = useCallback(
     () =>
       loadMore(async (page) =>
-        getFollowUpsPage(await getAccessToken(), status, page),
+        getFollowUpsPage(
+          await getAccessToken(),
+          status,
+          page,
+          filterKey ? (JSON.parse(filterKey) as FollowUpListFilters) : {},
+        ),
       ),
-    [loadMore, status],
+    [filterKey, loadMore, status],
   )
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDirectory(), 0)
     return () => window.clearTimeout(timer)
   }, [loadDirectory])
+
+  // Only Admins choose any Life Group; a failed lookup leaves just "All Life Groups".
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const groups = await getLifeGroups(await getAccessToken())
+        if (!cancelled) setLifeGroups(groups)
+      } catch {
+        if (!cancelled) setLifeGroups([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin])
 
   function openCompletion(followUp: FollowUp) {
     setCompletionTarget(followUp)
@@ -243,15 +327,94 @@ export function FollowUpsPage() {
             History
           </Button>
         </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" role="group" aria-label="Follow Up filters">
+          <FormField id="follow-up-reason-filter" label="Reason">
+            <Select
+              id="follow-up-reason-filter"
+              value={reasonFilter}
+              onChange={(event) => updateFilters({ reason: event.target.value })}
+            >
+              <option value="">All reasons</option>
+              {FOLLOW_UP_REASON_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+          </FormField>
+          {isAdmin ? (
+            <FormField id="follow-up-life-group-filter" label="Life Group">
+              <Select
+                id="follow-up-life-group-filter"
+                value={lifeGroupIdFilter}
+                onChange={(event) => updateFilters({ lifeGroupId: event.target.value })}
+              >
+                <option value="">All Life Groups</option>
+                {lifeGroups.map((lifeGroup) => (
+                  <option key={lifeGroup.id} value={lifeGroup.id}>
+                    {lifeGroup.name}{lifeGroup.isActive ? '' : ' (Archived)'}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          ) : (
+            <FormField
+              id="follow-up-life-group-filter"
+              label="Life Group"
+              description="Members and affiliated Visitors of the group you lead."
+            >
+              <Select
+                id="follow-up-life-group-filter"
+                value={isMyLifeGroup ? 'mine' : ''}
+                onChange={(event) => updateFilters({ lifeGroup: event.target.value })}
+              >
+                <option value="">All Life Groups</option>
+                <option value="mine">My Life Group</option>
+              </Select>
+            </FormField>
+          )}
+          <FormField id="follow-up-from-filter" label={status === 'active' ? 'Triggered from' : 'Completed from'}>
+            <TextInput
+              id="follow-up-from-filter"
+              type="date"
+              value={fromFilter}
+              max={toFilter || undefined}
+              onChange={(event) => updateFilters({ from: event.target.value })}
+            />
+          </FormField>
+          <FormField
+            id="follow-up-to-filter"
+            label={status === 'active' ? 'Triggered to' : 'Completed to'}
+            error={dateRangeError}
+          >
+            <TextInput
+              id="follow-up-to-filter"
+              type="date"
+              value={toFilter}
+              min={fromFilter || undefined}
+              hasError={Boolean(dateRangeError)}
+              aria-invalid={Boolean(dateRangeError)}
+              onChange={(event) => updateFilters({ to: event.target.value })}
+            />
+          </FormField>
+        </div>
       </section>
 
-      {isLoading ? (
+      {dateRangeError ? null : isLoading ? (
         <LoadingState title="Loading Follow Up" description={`Retrieving the shared ${status === 'active' ? 'active list' : 'history'}.`} />
       ) : loadError && followUps.length === 0 ? (
         <ErrorState
           title="Follow Up could not be loaded"
           description={loadError}
           action={<Button onClick={() => void loadDirectory()}>Try again</Button>}
+        />
+      ) : followUps.length === 0 && hasFilters ? (
+        <FilteredEmptyState
+          icon={status === 'active' ? HeartHandshake : History}
+          plural={status === 'active' ? 'active Follow Ups' : 'completed Follow Ups'}
+          search=""
+          searchFields=""
+          hasFilters
+          onClearFilters={resetFilters}
+          onClearSearch={resetFilters}
         />
       ) : followUps.length === 0 ? (
         <EmptyState
@@ -311,7 +474,7 @@ export function FollowUpsPage() {
         </ResponsiveTable>
       )}
 
-      {!isLoading && followUps.length > 0 && (
+      {!dateRangeError && !isLoading && followUps.length > 0 && (
         <LoadMoreFooter
           error={followUpList.loadMoreError}
           hasMore={followUpList.hasMore}

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
 import type { AuthService, HorizonActor } from "../auth/types.js";
-import type { Database } from "../types/database.types.js";
+import type { Database } from "../types/database.overrides.js";
 import { createSupabaseFollowUpService } from "./supabase-follow-up-service.js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -88,8 +88,12 @@ describeLocal("Follow Up API with local Supabase", () => {
     return data.id;
   }
 
-  async function visitor(firstName: string) {
-    const { data, error } = await client.from("visitors").insert({ first_name: firstName, last_name: "Follow Visitor" }).select("id").single();
+  async function visitor(firstName: string, lifeGroupId: string | null = null) {
+    const { data, error } = await client.from("visitors").insert({
+      first_name: firstName,
+      last_name: "Follow Visitor",
+      life_group_id: lifeGroupId,
+    }).select("id").single();
     if (error) throw error;
     visitorIds.push(data.id);
     return data.id;
@@ -173,5 +177,54 @@ describeLocal("Follow Up API with local Supabase", () => {
     expect(visitorFollowUp.subject).toMatchObject({ id: subjectVisitorId, recordStatus: "converted", type: "visitor" });
     expect(visitorFollowUp.subject.id).not.toBe(convertedMemberId);
     expect((await api("admin", "post", "/api/follow-ups").send({ memberId: subjectMemberId })).status).toBe(404);
+  });
+
+  it("filters by My Life Group (Members and affiliated Visitors), reason, and Manila dates", async () => {
+    const leaderId = await profile("Filter Leader", "leader");
+    const otherLeaderId = await profile("Other Filter Leader", "leader");
+    const unassignedLeaderId = await profile("Unassigned Filter Leader", "leader");
+    const groupId = await group("Filter Group", leaderId);
+    const otherGroupId = await group("Other Filter Group", otherLeaderId);
+    const ownMemberId = await member("Own", groupId);
+    const otherMemberId = await member("Other", otherGroupId);
+    const affiliatedVisitorId = await visitor("Affiliated", groupId);
+    const unaffiliatedVisitorId = await visitor("Unaffiliated");
+    const create = async (subject: { memberId?: string; visitorId?: string }, reason: "consecutive_sunday_absence" | "harvest_sunday_interest") => {
+      const { error } = await client.rpc("create_follow_up_if_absent", {
+        p_context: {},
+        p_member_id: subject.memberId ?? null,
+        p_reason: reason,
+        p_visitor_id: subject.visitorId ?? null,
+      });
+      if (error) throw error;
+    };
+    await create({ memberId: ownMemberId }, "consecutive_sunday_absence");
+    await create({ memberId: otherMemberId }, "consecutive_sunday_absence");
+    await create({ visitorId: affiliatedVisitorId }, "harvest_sunday_interest");
+    await create({ visitorId: unaffiliatedVisitorId }, "harvest_sunday_interest");
+
+    const service = createSupabaseFollowUpService({ serviceRoleKey: localKey, supabaseUrl: localUrl });
+    const leader: HorizonActor = { id: leaderId, isActive: true, name: "Filter Leader", role: "leader" };
+    const ours = new Set([ownMemberId, otherMemberId, affiliatedVisitorId, unaffiliatedVisitorId]);
+    const subjectIds = (list: { subject: { id: string } }[]) =>
+      list.map((entry) => entry.subject.id).filter((id) => ours.has(id)).sort();
+
+    const mine = await service.list(leader, "active", { lifeGroup: { type: "mine" } });
+    expect(subjectIds(mine)).toEqual([ownMemberId, affiliatedVisitorId].sort());
+    const minePage = await service.listPage(leader, "active", { limit: 1, offset: 0 }, { lifeGroup: { type: "mine" } });
+    expect(minePage.meta.total).toBe(2);
+    const mineByReason = await service.list(leader, "active", { lifeGroup: { type: "mine" }, reason: "harvest_sunday_interest" });
+    expect(subjectIds(mineByReason)).toEqual([affiliatedVisitorId]);
+    const byReason = await service.list(leader, "active", { reason: "consecutive_sunday_absence" });
+    expect(subjectIds(byReason)).toEqual([ownMemberId, otherMemberId].sort());
+    const otherGroup = await service.list(leader, "active", { lifeGroup: { lifeGroupId: otherGroupId, type: "lifeGroup" } });
+    expect(subjectIds(otherGroup)).toEqual([otherMemberId]);
+
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(new Date());
+    expect(subjectIds(await service.list(leader, "active", { fromDate: today, toDate: today }))).toHaveLength(4);
+    expect(subjectIds(await service.list(leader, "active", { toDate: "2000-01-01" }))).toEqual([]);
+
+    const unassigned: HorizonActor = { id: unassignedLeaderId, isActive: true, name: "Unassigned Filter Leader", role: "leader" };
+    expect(await service.list(unassigned, "active", { lifeGroup: { type: "mine" } })).toEqual([]);
   });
 });

@@ -14,12 +14,15 @@ import {
   FOLLOW_UP_REASON_LABELS,
   FollowUpServiceError,
   type FollowUp,
+  type FollowUpListFilters,
   type FollowUpService,
   type FollowUpStatus,
   type SundayAbsenceFollowUpContext,
 } from "./types.js";
 
 interface SupabaseFollowUpServiceConfig {
+  /** Test seam: replaces the HTTP client PostgREST requests go through. */
+  fetchImpl?: typeof globalThis.fetch;
   serviceRoleKey: string;
   supabaseUrl: string;
 }
@@ -37,6 +40,9 @@ type ProfileRow = Pick<Tables<"profiles">, "id" | "name">;
 
 const FOLLOW_UP_COLUMNS =
   "id, member_id, visitor_id, reason, context, status, created_at, completed_by_profile_id, completed_at, completion_note";
+/** Adds left embeds of the subject so a Life Group filter can match either subject type. */
+const FOLLOW_UP_COLUMNS_WITH_SUBJECT_GROUPS =
+  `${FOLLOW_UP_COLUMNS}, members!left(id), visitors!left(id)` as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -56,6 +62,19 @@ function followUpNotFound() {
   );
 }
 
+/** Asia/Manila is a fixed +08:00 offset, so a calendar date maps to one exact instant range. */
+function manilaDayStart(calendarDate: string) {
+  return new Date(`${calendarDate}T00:00:00+08:00`).toISOString();
+}
+
+function manilaDayAfter(calendarDate: string) {
+  const start = new Date(`${calendarDate}T00:00:00+08:00`);
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** The Life Group a filter resolves to; `null` means the filter matches nothing. */
+type ResolvedFilters = Omit<FollowUpListFilters, "lifeGroup"> & { lifeGroupId?: string | null };
+
 function validateSundayContext(context: SundayAbsenceFollowUpContext) {
   return (
     Number.isInteger(context.threshold) &&
@@ -67,10 +86,12 @@ function validateSundayContext(context: SundayAbsenceFollowUpContext) {
 }
 
 export function createSupabaseFollowUpService({
+  fetchImpl,
   serviceRoleKey,
   supabaseUrl,
 }: SupabaseFollowUpServiceConfig): FollowUpService {
   const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
     auth: {
       autoRefreshToken: false,
       detectSessionInUrl: false,
@@ -78,15 +99,54 @@ export function createSupabaseFollowUpService({
     },
   });
 
-  /** Active oldest first; History most recently completed first; `id` breaks ties. */
-  function buildStatusQuery(status: FollowUpStatus, countOptions?: CountOptions) {
-    const query = supabase
-      .from("follow_ups")
-      .select(FOLLOW_UP_COLUMNS, countOptions)
-      .eq("status", status);
+  /**
+   * Active oldest first; History most recently completed first; `id` breaks ties.
+   * Date filters apply to `created_at` for active and `completed_at` for History.
+   * A Life Group filter matches a Member subject whose current Life Group, or a
+   * Visitor subject whose current affiliation (DEC-064), is that group.
+   */
+  function buildStatusQuery(
+    status: FollowUpStatus,
+    countOptions?: CountOptions,
+    filters: ResolvedFilters = {},
+  ) {
+    const { fromDate, lifeGroupId, reason, toDate } = filters;
+    let query = lifeGroupId
+      ? supabase
+          .from("follow_ups")
+          .select(FOLLOW_UP_COLUMNS_WITH_SUBJECT_GROUPS, countOptions)
+          .eq("status", status)
+          .eq("members.life_group_id", lifeGroupId)
+          .eq("visitors.life_group_id", lifeGroupId)
+          .or("members.not.is.null,visitors.not.is.null")
+      : supabase
+          .from("follow_ups")
+          .select(FOLLOW_UP_COLUMNS, countOptions)
+          .eq("status", status);
+    const dateColumn = status === "active" ? "created_at" : "completed_at";
+    if (reason) query = query.eq("reason", reason);
+    if (fromDate) query = query.gte(dateColumn, manilaDayStart(fromDate));
+    if (toDate) query = query.lt(dateColumn, manilaDayAfter(toDate));
     return status === "active"
       ? query.order("created_at").order("id")
       : query.order("completed_at", { ascending: false }).order("id");
+  }
+
+  /** Resolves `lifeGroup: mine` to the Life Group the actor leads, if any. */
+  async function resolveFilters(
+    actor: HorizonActor,
+    filters: FollowUpListFilters = {},
+  ): Promise<ResolvedFilters> {
+    const { lifeGroup, ...rest } = filters;
+    if (!lifeGroup) return rest;
+    if (lifeGroup.type === "lifeGroup") return { ...rest, lifeGroupId: lifeGroup.lifeGroupId };
+    const { data, error } = await supabase
+      .from("life_groups")
+      .select("id")
+      .eq("leader_profile_id", actor.id)
+      .maybeSingle();
+    if (error) throw serviceUnavailable();
+    return { ...rest, lifeGroupId: data?.id ?? null };
   }
 
   async function getRows(status: FollowUpStatus, followUpId?: string) {
@@ -176,13 +236,21 @@ export function createSupabaseFollowUpService({
   }
 
   return {
-    async list(_actor: HorizonActor, status: FollowUpStatus) {
-      return mapRows(await getRows(status));
+    async list(actor: HorizonActor, status: FollowUpStatus, filters) {
+      const resolved = await resolveFilters(actor, filters);
+      if (resolved.lifeGroupId === null) return [];
+      const { data, error } = await fetchAllRows(() => buildStatusQuery(status, undefined, resolved));
+      if (error) throw serviceUnavailable();
+      return mapRows(data);
     },
 
-    async listPage(_actor: HorizonActor, status: FollowUpStatus, page) {
+    async listPage(actor: HorizonActor, status: FollowUpStatus, page, filters) {
+      const resolved = await resolveFilters(actor, filters);
+      if (resolved.lifeGroupId === null) {
+        return { items: [], meta: buildPageMeta(page, 0, 0) };
+      }
       const { data, error } = await fetchRowPage(
-        (countOptions) => buildStatusQuery(status, countOptions),
+        (countOptions) => buildStatusQuery(status, countOptions, resolved),
         page,
       );
       if (error) throw serviceUnavailable();

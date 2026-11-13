@@ -47,6 +47,7 @@ function service(): FollowUpService {
       status: "completed",
     })),
     list: vi.fn(async () => [followUp]),
+    listPage: vi.fn(async () => ({ items: [followUp], meta: { hasMore: false, limit: 50, offset: 0, total: 1 } })),
     triggerSundayAbsence: vi.fn(async () => ({ followUp, outcome: "created" })),
   };
 }
@@ -76,8 +77,8 @@ describe("Follow Up API", () => {
     const history = await request(app).get("/api/follow-ups?status=completed").set("Authorization", "Bearer admin-token");
     expect([active.status, history.status]).toEqual([200, 200]);
     expect(active.headers["cache-control"]).toBe("private, no-store");
-    expect(followUpService.list).toHaveBeenNthCalledWith(1, actors.leader, "active");
-    expect(followUpService.list).toHaveBeenNthCalledWith(2, actors.admin, "completed");
+    expect(followUpService.list).toHaveBeenNthCalledWith(1, actors.leader, "active", {});
+    expect(followUpService.list).toHaveBeenNthCalledWith(2, actors.admin, "completed", {});
   });
 
   it("rejects invalid list status deterministically", async () => {
@@ -85,6 +86,55 @@ describe("Follow Up API", () => {
     const response = await request(app).get("/api/follow-ups?status=all").set("Authorization", "Bearer leader-token");
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe("INVALID_REQUEST");
+    expect(followUpService.list).not.toHaveBeenCalled();
+  });
+
+  it("passes each list filter, and combinations, to the service for both roles", async () => {
+    const { app, followUpService } = testApp();
+    const groupId = "66666666-6666-4666-8666-666666666666";
+    const responses = await Promise.all([
+      request(app).get("/api/follow-ups?reason=opencell_high_participation").set("Authorization", "Bearer leader-token"),
+      request(app).get("/api/follow-ups?lifeGroup=mine").set("Authorization", "Bearer leader-token"),
+      request(app).get("/api/follow-ups?status=completed&from=2026-11-01&to=2026-11-30").set("Authorization", "Bearer leader-token"),
+      request(app)
+        .get(`/api/follow-ups?lifeGroupId=${groupId}&reason=harvest_sunday_interest&from=2026-11-02&limit=50`)
+        .set("Authorization", "Bearer admin-token"),
+    ]);
+    expect(responses.map(({ status }) => status)).toEqual([200, 200, 200, 200]);
+    expect(followUpService.list).toHaveBeenCalledWith(actors.leader, "active", { reason: "opencell_high_participation" });
+    expect(followUpService.list).toHaveBeenCalledWith(actors.leader, "active", { lifeGroup: { type: "mine" } });
+    expect(followUpService.list).toHaveBeenCalledWith(actors.leader, "completed", {
+      fromDate: "2026-11-01",
+      toDate: "2026-11-30",
+    });
+    expect(followUpService.listPage).toHaveBeenCalledWith(actors.admin, "active", { limit: 50, offset: 0 }, {
+      fromDate: "2026-11-02",
+      lifeGroup: { lifeGroupId: groupId, type: "lifeGroup" },
+      reason: "harvest_sunday_interest",
+    });
+  });
+
+  it("rejects invalid filters and keeps any-group filtering Admin-only", async () => {
+    const { app, followUpService } = testApp();
+    const groupId = "66666666-6666-4666-8666-666666666666";
+    const get = (query: string, token = "leader-token") =>
+      request(app).get(`/api/follow-ups?${query}`).set("Authorization", `Bearer ${token}`);
+    const invalid = await Promise.all([
+      get("reason=manual"),
+      get("reason=toString"),
+      get("lifeGroup=all"),
+      get(`lifeGroup=mine&lifeGroupId=${groupId}`, "admin-token"),
+      get("lifeGroupId=not-a-uuid", "admin-token"),
+      get("from=2026-02-30"),
+      get("to=11/30/2026"),
+      get("from=2026-12-01&to=2026-11-01"),
+      get("reason=harvest_sunday_interest&reason=opencell_high_participation"),
+    ]);
+    const leaderAnyGroup = await get(`lifeGroupId=${groupId}`);
+    expect(invalid.map(({ status }) => status)).toEqual(Array(9).fill(400));
+    expect(invalid.every(({ body }) => body.error.code === "INVALID_REQUEST")).toBe(true);
+    expect(leaderAnyGroup.status).toBe(403);
+    expect(leaderAnyGroup.body.error.code).toBe("FORBIDDEN");
     expect(followUpService.list).not.toHaveBeenCalled();
   });
 

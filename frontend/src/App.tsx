@@ -66,6 +66,10 @@ const UsersPage = lazy(() =>
   import('./pages/UsersPage').then((module) => ({ default: module.UsersPage })),
 )
 
+const UserAuditLogPage = lazy(() =>
+  import('./pages/UserAuditLogPage').then((module) => ({ default: module.UserAuditLogPage })),
+)
+
 function App() {
   return (
     <BrowserRouter>
@@ -192,6 +196,16 @@ function App() {
                   <RoleRoute allowedRoles={['admin']}>
                     <Suspense fallback={<LoadingState title="Loading Users" description="Preparing staff account management." />}>
                       <UsersPage />
+                    </Suspense>
+                  </RoleRoute>
+                }
+              />
+              <Route
+                path="users/activity"
+                element={
+                  <RoleRoute allowedRoles={['admin']}>
+                    <Suspense fallback={<LoadingState title="Loading activity log" description="Preparing the account activity log." />}>
+                      <UserAuditLogPage />
                     </Suspense>
                   </RoleRoute>
                 }

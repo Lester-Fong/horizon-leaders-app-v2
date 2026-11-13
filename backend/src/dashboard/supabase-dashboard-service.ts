@@ -8,6 +8,8 @@ import type { Tables } from "../types/database.types.js";
 import { FOLLOW_UP_REASON_LABELS, type FollowUpReason } from "../follow-ups/types.js";
 import {
   DashboardServiceError,
+  type AutomationRunStatus,
+  type DashboardAutomationStatus,
   type DashboardBreakdown,
   type DashboardData,
   type DashboardService,
@@ -15,6 +17,10 @@ import {
 
 interface Config { fetchImpl?: typeof globalThis.fetch; serviceRoleKey: string; supabaseUrl: string }
 type EventRow = Pick<Tables<"events">, "counts_for_absence" | "event_date" | "id" | "status" | "title" | "type">;
+
+const SUNDAY_RECONCILIATION_JOB = "sunday_reconciliation";
+const PENDING_SERVICE_LIMIT = 5;
+const AUTOMATION_RUN_STATUSES: readonly AutomationRunStatus[] = ["running", "succeeded", "partial", "failed"];
 
 const REASONS: FollowUpReason[] = [
   "consecutive_sunday_absence",
@@ -83,6 +89,42 @@ export function createSupabaseDashboardService({ fetchImpl, serviceRoleKey, supa
     const { data, error } = await supabase.from("life_groups").select("id").eq("leader_profile_id", actor.id).maybeSingle();
     if (error) unavailable();
     return data?.id ?? null;
+  }
+
+  /** Latest Sunday reconciliation run plus the closed counting Services it still has to evaluate. */
+  async function automationStatus(): Promise<DashboardAutomationStatus> {
+    const [runResult, pendingResult] = await Promise.all([
+      supabase.from("automation_runs")
+        .select("job_name, status, started_at, finished_at, processed_count, error_count, error_summary")
+        .eq("job_name", SUNDAY_RECONCILIATION_JOB)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase.from("events")
+        .select("id, event_date, title, sunday_service_evaluations!left(event_id)", { count: "exact" })
+        .eq("type", "service").eq("status", "closed").eq("counts_for_absence", true)
+        .is("sunday_service_evaluations", null)
+        .order("event_date", { ascending: true }).order("id", { ascending: true })
+        .limit(PENDING_SERVICE_LIMIT),
+    ]);
+    if (runResult.error || pendingResult.error) unavailable();
+    const run = runResult.data;
+    if (run && !AUTOMATION_RUN_STATUSES.includes(run.status as AutomationRunStatus)) unavailable();
+    return {
+      lastRun: run
+        ? {
+          errorCount: run.error_count,
+          errorSummary: run.error_summary,
+          finishedAt: run.finished_at,
+          jobName: run.job_name,
+          processedCount: run.processed_count,
+          startedAt: run.started_at,
+          status: run.status as AutomationRunStatus,
+        }
+        : null,
+      pendingServiceCount: pendingResult.count ?? 0,
+      pendingServices: (pendingResult.data ?? []).map((row) => ({ date: row.event_date, eventId: row.id, title: row.title })),
+    };
   }
 
   return {
@@ -178,6 +220,8 @@ export function createSupabaseDashboardService({ fetchImpl, serviceRoleKey, supa
         supabase.from("opencell_programmes").select("id, name, finished_at").eq("status", "finished").order("finished_at", { ascending: false }).limit(6),
       ]);
       if (upcomingEvents.error || upcomingSessions.error || gatheringsResult.error || finishedResult.error) unavailable();
+      // Leaders never query or receive automation data (DEC-079).
+      const automation = actor.role === "admin" ? await automationStatus() : undefined;
       const upcoming = [
         ...(upcomingEvents.data ?? []).map((row) => ({ context: row.type === "service" ? "Sunday Service" : "Harvest", date: row.event_date, href: row.type === "service" ? `/events/${row.id}` : `/events/harvest/${row.id}`, id: row.id, kind: row.type, status: row.status, title: row.title })),
         ...(upcomingSessions.data ?? []).map((row) => ({ context: "OpenCell", date: row.session_date, href: "/opencell", id: row.id, kind: "opencell_session", status: "upcoming", title: row.title ?? "OpenCell session" })),
@@ -188,6 +232,7 @@ export function createSupabaseDashboardService({ fetchImpl, serviceRoleKey, supa
       ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
 
       return {
+        ...(automation ? { automation } : {}),
         isUnassignedLeader,
         memberSnapshot: { age: breakdown(["under_18", "18_24", "25_34", "35_44", "45_54", "55_plus", "not_set"], memberAge, AGE_LABELS, activeMemberCount), gender: breakdown(["male", "female", "not_set"], memberGender, GENDER_LABELS, activeMemberCount) },
         metrics: actor.role === "admin"

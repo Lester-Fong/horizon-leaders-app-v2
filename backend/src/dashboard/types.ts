@@ -42,7 +42,37 @@ export interface DashboardBreakdown {
   percentage: number;
 }
 
+/** Statuses written by `public.reconcile_sunday_services()` (DEC-067). */
+export type AutomationRunStatus = "running" | "succeeded" | "partial" | "failed";
+
+export interface AutomationRun {
+  errorCount: number;
+  errorSummary: string | null;
+  finishedAt: string | null;
+  jobName: string;
+  processedCount: number;
+  startedAt: string;
+  status: AutomationRunStatus;
+}
+
+export interface PendingSundayService {
+  date: string;
+  eventId: string;
+  title: string;
+}
+
+/** Admin-only Sunday reconciliation visibility (DEC-079). */
+export interface DashboardAutomationStatus {
+  lastRun: AutomationRun | null;
+  /** Closed counting Services not yet evaluated; the next daily run retries them. */
+  pendingServiceCount: number;
+  /** Oldest pending Services first, at most five. */
+  pendingServices: PendingSundayService[];
+}
+
 export interface DashboardData {
+  /** Present only for Admins; Leaders never receive automation data. */
+  automation?: DashboardAutomationStatus;
   /** True only for a Leader who leads no Life Group; group-scoped values are then zero/empty. */
   isUnassignedLeader: boolean;
   memberSnapshot: { age: DashboardBreakdown[]; gender: DashboardBreakdown[] };

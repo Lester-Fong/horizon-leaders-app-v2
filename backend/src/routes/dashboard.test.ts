@@ -37,4 +37,13 @@ describe("Dashboard API", () => {
     expect(service.get).toHaveBeenNthCalledWith(1, admin, { period: "4", lifeGroupId: groupId });
     expect(service.get).toHaveBeenNthCalledWith(2, leader, { period: "12" });
   });
+
+  it("returns the Admin automation status in a private response", async () => {
+    const automation = { lastRun: null, pendingServiceCount: 2, pendingServices: [] };
+    const service: DashboardService = { get: vi.fn(async () => ({ ...dashboard, automation })) };
+    const response = await request(app(service)).get("/api/dashboard").set("Authorization", "Bearer admin");
+    expect(response.status).toBe(200);
+    expect(response.body.data.automation).toEqual(automation);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+  });
 });

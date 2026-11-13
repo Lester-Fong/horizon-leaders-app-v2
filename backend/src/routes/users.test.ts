@@ -49,6 +49,10 @@ function createUserService(): UserService {
     getById: vi.fn(async () => user),
     list: vi.fn(async () => [user]),
     listActivity: vi.fn(async () => []),
+    listAuditPage: vi.fn(async (page) => ({
+      items: [],
+      meta: { hasMore: false, limit: page.limit, offset: page.offset, total: 0 },
+    })),
     resetPassword: vi.fn(async (_actor, id) => ({ id })),
     setActive: vi.fn(async (_actor, _id, isActive) => ({ ...user, isActive })),
     update: vi.fn(async (_actor, _id, input) => ({ ...user, ...input })),
@@ -422,5 +426,54 @@ describe("Users API pagination", () => {
       expect(response.body.error.code).toBe("INVALID_REQUEST");
     }
     expect(userService.list).not.toHaveBeenCalled();
+  });
+});
+
+describe("Users API audit log", () => {
+  it("requires authentication", async () => {
+    const { app, userService } = createTestApp();
+    const response = await request(app).get("/api/users/audit-events");
+
+    expect(response.status).toBe(401);
+    expect(userService.listAuditPage).not.toHaveBeenCalled();
+  });
+
+  it("rejects Leaders", async () => {
+    const { app, userService } = createTestApp();
+    const response = await request(app).get("/api/users/audit-events").set(asLeader);
+
+    expect(response.status).toBe(403);
+    expect(userService.listAuditPage).not.toHaveBeenCalled();
+  });
+
+  it("returns a page with meta to Admins, defaulting to the first 50 rows", async () => {
+    const { app, userService } = createTestApp();
+
+    const defaulted = await request(app).get("/api/users/audit-events").set(asAdmin);
+    const paged = await request(app)
+      .get("/api/users/audit-events?limit=25&offset=50")
+      .set(asAdmin);
+
+    expect(defaulted.status).toBe(200);
+    expect(defaulted.headers["cache-control"]).toBe("private, no-store");
+    expect(defaulted.body).toEqual({
+      data: [],
+      meta: { hasMore: false, limit: 50, offset: 0, total: 0 },
+    });
+    expect(userService.listAuditPage).toHaveBeenNthCalledWith(1, { limit: 50, offset: 0 });
+    expect(paged.status).toBe(200);
+    expect(userService.listAuditPage).toHaveBeenNthCalledWith(2, { limit: 25, offset: 50 });
+    expect(userService.getById).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid paging", async () => {
+    const { app, userService } = createTestApp();
+
+    for (const query of ["limit=0", "limit=101", "limit=x", "offset=10", "limit=10&offset=-1"]) {
+      const response = await request(app).get(`/api/users/audit-events?${query}`).set(asAdmin);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("INVALID_REQUEST");
+    }
+    expect(userService.listAuditPage).not.toHaveBeenCalled();
   });
 });

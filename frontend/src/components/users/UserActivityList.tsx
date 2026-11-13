@@ -3,42 +3,14 @@ import { useEffect, useState } from 'react'
 import { ApiError, getUserActivity, type UserActivityEvent } from '../../lib/api'
 import { formatTimestampDateTime } from '../../lib/dates'
 import { getAccessToken } from '../../lib/session'
+import { describeUserActivityChanges, USER_ACTIVITY_ACTION_LABELS } from './userActivityFormat'
 
 interface UserActivityListProps {
   userId: string
 }
 
-const ACTION_LABELS: Record<UserActivityEvent['action'], string> = {
-  password_changed: 'Changed their password',
-  password_reset: 'Password reset',
-  user_created: 'Account created',
-  user_deactivated: 'Deactivated',
-  user_deleted: 'Account deleted',
-  user_reactivated: 'Reactivated',
-  user_updated: 'Details updated',
-}
-
-const FIELD_LABELS: Record<string, string> = { email: 'email', name: 'name', role: 'role' }
-
-function isChange(value: unknown): value is { from: unknown; to: unknown } {
-  return typeof value === 'object' && value !== null && 'from' in value && 'to' in value
-}
-
-function describeChanges(event: UserActivityEvent) {
-  const changes = event.details.changes
-  if (typeof changes !== 'object' || changes === null) return null
-
-  const parts = Object.entries(changes)
-    .filter(([, change]) => isChange(change))
-    .map(([field, change]) => {
-      const { from, to } = change as { from: unknown; to: unknown }
-      return `${FIELD_LABELS[field] ?? field}: ${String(from ?? 'none')} → ${String(to)}`
-    })
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
 function describeEvent(event: UserActivityEvent, userId: string) {
-  const label = ACTION_LABELS[event.action]
+  const label = USER_ACTIVITY_ACTION_LABELS[event.action]
   if (event.action === 'password_changed') return label
   // This list also shows changes the viewed user made to other accounts.
   if (event.targetUserId !== userId) return `${label}: ${event.targetName}`
@@ -87,7 +59,7 @@ export function UserActivityList({ userId }: UserActivityListProps) {
       ) : (
         <ol className="mt-3 max-h-64 overflow-y-auto border-y border-line">
           {events.map((event) => {
-            const changes = describeChanges(event)
+            const changes = describeUserActivityChanges(event)
             return (
               <li key={event.id} className="border-b border-line py-3 last:border-b-0">
                 <p className="text-sm font-medium text-ink">{describeEvent(event, userId)}</p>

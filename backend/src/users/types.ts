@@ -1,4 +1,5 @@
 import type { AppRole, HorizonActor } from "../auth/types.js";
+import type { Page, PageRequest } from "../http/pagination.js";
 
 /** Auth email domain for deleted users; `.invalid` is reserved and never routes mail. */
 export const DELETED_EMAIL_DOMAIN = "deleted.invalid";
@@ -104,6 +105,8 @@ export interface UserService {
   getById(userId: string): Promise<ManagedUser>;
   list(options: ListUsersOptions): Promise<ManagedUser[]>;
   listActivity(userId: string): Promise<UserActivityEvent[]>;
+  /** Every recorded account change across all users, newest first. */
+  listAuditPage(page: PageRequest): Promise<Page<UserActivityEvent>>;
   resetPassword(
     actor: HorizonActor,
     userId: string,

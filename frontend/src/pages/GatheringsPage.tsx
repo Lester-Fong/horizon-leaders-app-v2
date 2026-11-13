@@ -14,7 +14,12 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   GatheringFormModal,
   type GatheringFormContext,
+  type GatheringSaveResult,
 } from '../components/gatherings/GatheringFormModal'
+import {
+  copyablePreviousAttendees,
+  type PrefillAttendee,
+} from '../components/gatherings/previousGathering'
 import { Button, LinkButton } from '../components/ui/Button'
 import {
   EmptyState,
@@ -175,21 +180,83 @@ export function GatheringsPage() {
     }
   }
 
-  async function saveGathering(input: GatheringInput) {
+  async function loadPreviousAttendees(gatheringId: string) {
+    if (!lifeGroupId) {
+      throw new ApiError(404, 'LIFE_GROUP_NOT_FOUND', 'Life Group was not found.')
+    }
+    const token = await getAccessToken()
+    return copyablePreviousAttendees(
+      await getGatheringAttendance(token, lifeGroupId, gatheringId),
+    )
+  }
+
+  /**
+   * Marks copied attendees present one by one. The server still validates
+   * each mark; a person who became ineligible is counted as not recorded.
+   */
+  async function recordCopiedAttendees(
+    token: string,
+    gatheringId: string,
+    attendees: PrefillAttendee[],
+  ) {
+    let recordedAttendeeCount = 0
+    let failedAttendeeCount = 0
+    for (const attendee of attendees) {
+      try {
+        if (attendee.personType === 'member') {
+          await markGatheringAttendance(token, lifeGroupId!, gatheringId, attendee.id)
+        } else {
+          await markGatheringVisitorAttendance(token, lifeGroupId!, gatheringId, attendee.id)
+        }
+        recordedAttendeeCount += 1
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'ATTENDANCE_ALREADY_RECORDED') {
+          recordedAttendeeCount += 1
+        } else {
+          failedAttendeeCount += 1
+        }
+      }
+    }
+    return { failedAttendeeCount, recordedAttendeeCount }
+  }
+
+  async function saveGathering(
+    input: GatheringInput,
+    attendees: PrefillAttendee[],
+  ): Promise<GatheringSaveResult> {
     if (!lifeGroupId) {
       throw new ApiError(404, 'LIFE_GROUP_NOT_FOUND', 'Life Group was not found.')
     }
     const token = await getAccessToken()
     if (formContext?.mode === 'edit') {
-      return updateGathering(token, lifeGroupId, formContext.gathering.id, input)
+      const gathering = await updateGathering(token, lifeGroupId, formContext.gathering.id, input)
+      return { failedAttendeeCount: 0, gathering, recordedAttendeeCount: 0 }
     }
-    return createGathering(token, lifeGroupId, input)
+    const gathering = await createGathering(token, lifeGroupId, input)
+    return {
+      gathering,
+      ...(await recordCopiedAttendees(token, gathering.id, attendees)),
+    }
   }
 
-  function handleGatheringSaved(saved: LifeGroupGathering) {
+  function handleGatheringSaved({
+    failedAttendeeCount,
+    gathering: saved,
+    recordedAttendeeCount,
+  }: GatheringSaveResult) {
     const wasEditing = formContext?.mode === 'edit'
     setFormContext(null)
-    setNotice(`${gatheringName(saved)} was ${wasEditing ? 'updated' : 'created'}.`)
+    const attendanceNote = [
+      recordedAttendeeCount > 0
+        ? ` ${recordedAttendeeCount} ${recordedAttendeeCount === 1 ? 'person was' : 'people were'} marked present.`
+        : '',
+      failedAttendeeCount > 0
+        ? ` ${failedAttendeeCount} could not be marked; use Manage attendance to review.`
+        : '',
+    ].join('')
+    setNotice(
+      `${gatheringName(saved)} was ${wasEditing ? 'updated' : 'created'}.${attendanceNote}`,
+    )
     void loadDirectory()
   }
 
@@ -464,6 +531,8 @@ export function GatheringsPage() {
         <GatheringFormModal
           context={formContext}
           lifeGroupName={lifeGroup.name}
+          previousGathering={formContext.mode === 'create' ? (gatherings[0] ?? null) : null}
+          loadPreviousAttendees={loadPreviousAttendees}
           onClose={() => setFormContext(null)}
           onSave={saveGathering}
           onSaved={handleGatheringSaved}

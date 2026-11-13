@@ -1,5 +1,6 @@
 import {
   Eye,
+  History,
   KeyRound,
   Pencil,
   Plus,
@@ -21,7 +22,7 @@ import {
   UserStatusBadge,
 } from '../components/users/UserProfileDetails'
 import { UserFormModal, type UserFormContext } from '../components/users/UserFormModal'
-import { Button } from '../components/ui/Button'
+import { Button, LinkButton } from '../components/ui/Button'
 import {
   EmptyState,
   ErrorState,
@@ -365,6 +366,10 @@ export function UsersPage() {
               <RefreshCw aria-hidden="true" className="size-4" />
               Refresh
             </Button>
+            <LinkButton to="/users/activity" variant="secondary">
+              <History aria-hidden="true" className="size-4" />
+              Activity log
+            </LinkButton>
           </>
         }
       />

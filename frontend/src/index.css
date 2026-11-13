@@ -283,6 +283,43 @@ p {
     align-self: center;
   }
 
+  .horizon-table--audit {
+    display: block;
+    min-width: 0;
+  }
+
+  .horizon-table--audit thead {
+    display: none;
+  }
+
+  .horizon-table--audit tbody {
+    display: block;
+  }
+
+  .horizon-table--audit tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--hm-gray-200);
+  }
+
+  .horizon-table--audit tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .horizon-table--audit td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .horizon-table--audit .audit-cell-when,
+  .horizon-table--audit .audit-cell-change {
+    grid-column: 1 / -1;
+  }
+
   .horizon-table--members {
     display: block;
     min-width: 0;

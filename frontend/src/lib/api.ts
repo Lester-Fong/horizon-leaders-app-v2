@@ -113,7 +113,13 @@ export type MemberGenderFilter = 'male' | 'female' | 'not_set'
 export type MemberAgeFilter = 'under_18' | '18_24' | '25_34' | '35_44' | '45_54' | '55_plus' | 'not_set'
 
 export interface DashboardBreakdown { count: number; key: string; label: string; percentage: number }
+export type AutomationRunStatus = 'running' | 'succeeded' | 'partial' | 'failed'
+export interface AutomationRun { errorCount: number; errorSummary: string | null; finishedAt: string | null; jobName: string; processedCount: number; startedAt: string; status: AutomationRunStatus }
+/** Admin-only Sunday reconciliation visibility (DEC-079). */
+export interface DashboardAutomationStatus { lastRun: AutomationRun | null; pendingServiceCount: number; pendingServices: { date: string; eventId: string; title: string }[] }
 export interface DashboardData {
+  /** Present only for Admins. */
+  automation?: DashboardAutomationStatus
   /** True only for a Leader who leads no Life Group; group-scoped values are then zero/empty. */
   isUnassignedLeader?: boolean
   memberSnapshot: { age: DashboardBreakdown[]; gender: DashboardBreakdown[] }
@@ -958,7 +964,8 @@ const isDashboard = (value: unknown): value is DashboardData => {
   if (!isRecord(value) || !isRecord(value.metrics) || !isRecord(value.memberSnapshot) || !isRecord(value.needsAttention) || !isRecord(value.openCell) || !isRecord(value.recentUpcoming) || !isRecord(value.sundayAttendance)) return false
   return typeof value.metrics.activeFollowUps === 'number' && typeof value.metrics.activeOpenCellProgrammes === 'number' &&
     Array.isArray(value.memberSnapshot.gender) && Array.isArray(value.memberSnapshot.age) &&
-    Array.isArray(value.sundayAttendance.points) && Array.isArray(value.recentUpcoming.upcoming) && Array.isArray(value.recentUpcoming.recent)
+    Array.isArray(value.sundayAttendance.points) && Array.isArray(value.recentUpcoming.upcoming) && Array.isArray(value.recentUpcoming.recent) &&
+    (value.automation === undefined || (isRecord(value.automation) && typeof value.automation.pendingServiceCount === 'number' && Array.isArray(value.automation.pendingServices)))
 }
 
 const isMinistryList = (value: unknown): value is Ministry[] =>
@@ -1561,12 +1568,31 @@ export function getFollowUps(
   )
 }
 
+/**
+ * Optional narrowing of the shared Follow Up list. `lifeGroup: 'mine'` is the
+ * caller's led Life Group; `lifeGroupId` is Admin-only. Dates are inclusive
+ * Manila calendar dates on created (active) or completed (History) time.
+ */
+export interface FollowUpListFilters {
+  from?: string
+  lifeGroup?: 'mine'
+  lifeGroupId?: string
+  reason?: FollowUpReason
+  to?: string
+}
+
 export function getFollowUpsPage(
   accessToken: string,
   status: FollowUpStatus,
   page: PageRequest,
+  filters: FollowUpListFilters = {},
 ) {
-  const searchParameters = withPage(new URLSearchParams({ status }), page)
+  const parameters = new URLSearchParams({ status })
+  for (const key of ['reason', 'lifeGroup', 'lifeGroupId', 'from', 'to'] as const) {
+    const value = filters[key]
+    if (value) parameters.set(key, value)
+  }
+  const searchParameters = withPage(parameters, page)
   return requestApiPage(accessToken, `/follow-ups?${searchParameters}`, isFollowUp)
 }
 
@@ -1876,6 +1902,12 @@ const isUserActivityList = (value: unknown): value is UserActivityEvent[] =>
 
 export function getUserActivity(accessToken: string, userId: string) {
   return requestApi(accessToken, `/users/${userId}/activity`, isUserActivityList)
+}
+
+/** Admin-only: one page of every recorded account change, newest first. */
+export function getUserAuditPage(accessToken: string, page: PageRequest) {
+  const searchParameters = withPage(new URLSearchParams(), page)
+  return requestApiPage(accessToken, `/users/audit-events?${searchParameters}`, isUserActivityEvent)
 }
 
 /** Changes the signed-in user's own password. Every session is signed out afterwards. */
