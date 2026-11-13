@@ -76,7 +76,8 @@ export function createHarvestsRouter(authService: AuthService, service: HarvestS
   });
   router.patch("/events/harvest/:eventId", authenticated, async (request, response) => {
     const eventId = paramId(response, request.params.eventId, "Event ID");
-    if (!eventId || !request.actor || !isRecord(request.body)) return;
+    if (!eventId || !request.actor) return;
+    if (!isRecord(request.body)) return void sendError(response, 400, "INVALID_REQUEST", "A request body is required.");
     const input = updateInput(request.body);
     if (!input) return void sendError(response, 400, "INVALID_REQUEST", "Provide only valid editable Harvest Event fields.");
     await handle(response, () => service.update(request.actor!, eventId, input));
@@ -101,15 +102,18 @@ export function createHarvestsRouter(authService: AuthService, service: HarvestS
   });
   router.post("/events/harvest/:eventId/participations/new", authenticated, async (request, response) => {
     const eventId = paramId(response, request.params.eventId, "Event ID");
-    if (!eventId || !request.actor || !isRecord(request.body)) return;
+    if (!eventId || !request.actor) return;
+    if (!isRecord(request.body)) return void sendError(response, 400, "INVALID_REQUEST", "A request body is required.");
     const input = newVisitorInput(request.body);
     if (!input) return void sendError(response, 400, "INVALID_REQUEST", "First and last name are required; contact fields must be text or null.");
     await handle(response, () => service.registerNewVisitor(request.actor!, eventId, input), 201);
   });
   router.patch("/events/harvest/:eventId/participations/:visitorId/interest", authenticated, async (request, response) => {
     const eventId = paramId(response, request.params.eventId, "Event ID");
+    if (!eventId) return;
     const visitorId = paramId(response, request.params.visitorId, "Visitor ID");
-    if (!eventId || !visitorId || !request.actor || !isRecord(request.body)) return;
+    if (!visitorId || !request.actor) return;
+    if (!isRecord(request.body)) return void sendError(response, 400, "INVALID_REQUEST", "A boolean interested decision is required.");
     if (Object.keys(request.body).length !== 1 || typeof request.body.interested !== "boolean") return void sendError(response, 400, "INVALID_REQUEST", "A boolean interested decision is required.");
     await handle(response, () => service.recordInterest(request.actor!, eventId, visitorId, request.body.interested as boolean));
   });

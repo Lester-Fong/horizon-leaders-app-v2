@@ -9,6 +9,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ApiError, getMyProfile, type ManagedUser } from '../lib/api'
 import { getAccessToken } from '../lib/session'
+import { usePageTitle } from '../lib/usePageTitle'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -16,6 +17,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export function ProfilePage() {
+  usePageTitle('My profile')
   const [profile, setProfile] = useState<ManagedUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)

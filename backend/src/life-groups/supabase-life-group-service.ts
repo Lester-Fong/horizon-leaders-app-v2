@@ -23,7 +23,7 @@ type ProfileRow = Tables<"profiles">;
 
 const LIFE_GROUP_COLUMNS =
   "id, name, description, leader_profile_id, is_active, created_at, updated_at";
-const LEADER_COLUMNS = "id, name, is_active, role";
+const LEADER_COLUMNS = "id, name, is_active, role, deleted_at";
 
 function serviceUnavailable() {
   return new LifeGroupServiceError(
@@ -35,7 +35,7 @@ function serviceUnavailable() {
 
 function mapLifeGroup(
   lifeGroup: LifeGroupRow,
-  leader: Pick<ProfileRow, "id" | "is_active" | "name">,
+  leader: Pick<ProfileRow, "deleted_at" | "id" | "is_active" | "name">,
 ): LifeGroup {
   return {
     createdAt: lifeGroup.created_at,
@@ -45,6 +45,7 @@ function mapLifeGroup(
     leader: {
       id: leader.id,
       isActive: leader.is_active,
+      isDeleted: leader.deleted_at !== null,
       name: leader.name,
     },
     name: lifeGroup.name,
@@ -319,6 +320,7 @@ export function createSupabaseLifeGroupService({
         assignedLifeGroup: assignments.get(profile.id) ?? null,
         id: profile.id,
         isActive: profile.is_active,
+        isDeleted: profile.deleted_at !== null,
         name: profile.name,
       }));
     },

@@ -1,6 +1,13 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
-import { ApiError, type Ministry, type MinistryInput } from '../../lib/api'
+import {
+  ApiError,
+  getMinistries,
+  type Ministry,
+  type MinistryInput,
+} from '../../lib/api'
+import { duplicateNameWarning, findDuplicateName } from '../../lib/duplicateName'
+import { getAccessToken } from '../../lib/session'
 import { Button } from '../ui/Button'
 import { FeedbackBanner } from '../ui/Feedback'
 import { FormField, TextArea, TextInput } from '../ui/FormControls'
@@ -34,6 +41,34 @@ export function MinistryFormModal({
   const [nameError, setNameError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [existingMinistries, setExistingMinistries] = useState<Ministry[]>([])
+
+  useEffect(() => {
+    let isCurrent = true
+    async function loadExistingMinistries() {
+      try {
+        const token = await getAccessToken()
+        const allMinistries = await getMinistries(token, { status: 'all' })
+        if (isCurrent) setExistingMinistries(allMinistries)
+      } catch {
+        // The duplicate-name warning is a convenience; saving never depends on it.
+        if (isCurrent) setExistingMinistries([])
+      }
+    }
+    void loadExistingMinistries()
+    return () => {
+      isCurrent = false
+    }
+  }, [])
+
+  const duplicateMinistry = findDuplicateName(name, existingMinistries, ministry?.id)
+  const nameWarning = duplicateMinistry
+    ? duplicateNameWarning('Ministry', duplicateMinistry)
+    : ''
+  const nameDescribedBy =
+    [nameError ? 'ministry-name-error' : null, nameWarning ? 'ministry-name-warning' : null]
+      .filter(Boolean)
+      .join(' ') || undefined
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -97,10 +132,13 @@ export function MinistryFormModal({
             value={name}
             disabled={isSaving}
             hasError={Boolean(nameError)}
-            aria-describedby={nameError ? 'ministry-name-error' : undefined}
+            aria-describedby={nameDescribedBy}
             aria-invalid={Boolean(nameError)}
             onChange={(event) => setName(event.target.value)}
           />
+          <p id="ministry-name-warning" aria-live="polite" className="mt-2 text-sm text-ink empty:mt-0">
+            {nameWarning}
+          </p>
         </FormField>
         <FormField
           id="ministry-description"

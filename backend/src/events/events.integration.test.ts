@@ -144,4 +144,39 @@ describeLocal("Sunday Service API with local Supabase", () => {
     expect((await api("admin", "post", `/api/events/${excludedId}/close`)).status).toBe(200);
     const excludedRoster = await api("admin", "get", `/api/events/${excludedId}/attendance`); expect(excludedRoster.body.data.members.every((entry: { attendanceStatus: string }) => entry.isPresent || entry.attendanceStatus === "not_counted")).toBe(true);
   });
+
+  it("treats a re-sent stored date as unchanged and gives a Leader without a Life Group an empty roster", async () => {
+    const adminId = await profile("Edit Admin", "admin"); const leaderId = await profile("Edit Leader", "leader"); const unassignedId = await profile("Unassigned Leader", "leader");
+    const groupId = await group("Edit Group", leaderId); const checkedIn = await member("Cara", groupId);
+    const actors: Record<string, HorizonActor> = {
+      admin: { id: adminId, isActive: true, name: "Edit Admin", role: "admin" },
+      leader: { id: leaderId, isActive: true, name: "Edit Leader", role: "leader" },
+      unassigned: { id: unassignedId, isActive: true, name: "Unassigned Leader", role: "leader" },
+    };
+    const authService: AuthService = { authenticate: async (token) => ({ actor: actors[token]!, ok: true }) };
+    const app = createApp({ authService, eventService: createSupabaseEventService({ serviceRoleKey: localKey, supabaseUrl: localUrl }) });
+    const api = (actor: string, method: "get" | "patch" | "post", path: string) => request(app)[method](path).set("Authorization", `Bearer ${actor}`);
+    const eventDate = "2000-01-23";
+
+    const created = await api("admin", "post", "/api/events").send({ countsForAbsence: true, description: null, eventDate, location: null, title: "Locked Date Service" });
+    expect(created.status).toBe(201); const eventId = created.body.data.id as string; eventIds.push(eventId);
+    expect((await api("leader", "post", `/api/events/${eventId}/attendance`).send({ memberId: checkedIn.id })).status).toBe(201);
+
+    const unassignedRoster = await api("unassigned", "get", `/api/events/${eventId}/attendance`);
+    expect(unassignedRoster.status).toBe(200); expect(unassignedRoster.body.data).toEqual({ isUnassignedLeader: true, members: [] });
+    expect((await api("leader", "get", `/api/events/${eventId}/attendance`)).body.data.isUnassignedLeader).toBe(false);
+    expect((await api("unassigned", "post", `/api/events/${eventId}/attendance`).send({ memberId: checkedIn.id })).status).toBe(403);
+
+    const renamedOpen = await api("admin", "patch", `/api/events/${eventId}`).send({ countsForAbsence: true, description: null, eventDate, location: "Hall", title: "Renamed Service" });
+    expect(renamedOpen.status).toBe(200); expect(renamedOpen.body.data).toMatchObject({ eventDate, location: "Hall", title: "Renamed Service" });
+    const movedOpen = await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2000-01-30" });
+    expect(movedOpen.status).toBe(422); expect(movedOpen.body.error.code).toBe("EVENT_ACTIVITY_LOCKS_DATE");
+
+    expect((await api("admin", "post", `/api/events/${eventId}/close`)).status).toBe(200);
+    const unassignedClosedRoster = await api("unassigned", "get", `/api/events/${eventId}/attendance`);
+    expect(unassignedClosedRoster.status).toBe(200); expect(unassignedClosedRoster.body.data.members).toEqual([]);
+    const correctedClosed = await api("admin", "patch", `/api/events/${eventId}`).send({ countsForAbsence: false, description: null, eventDate, location: "Hall", title: "Closed Rename" });
+    expect(correctedClosed.status).toBe(200); expect(correctedClosed.body.data).toMatchObject({ countsForAbsence: false, eventDate, status: "closed", title: "Closed Rename" });
+    expect((await api("admin", "patch", `/api/events/${eventId}`).send({ eventDate: "2000-01-30" })).status).toBe(422);
+  });
 });

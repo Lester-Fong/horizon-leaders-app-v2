@@ -68,6 +68,7 @@ function createMinistryService(): MinistryService {
     getById: vi.fn(async () => ministry),
     list: vi.fn(async () => [ministry]),
     listMembers: vi.fn(async () => [ministryMember]),
+    reactivate: vi.fn(async () => ministry),
     removeMember: vi.fn(async () => ministryMember),
     update: vi.fn(async () => ministry),
   };
@@ -229,6 +230,49 @@ describe("Ministry API authorization and validation", () => {
     expect(ministryService.create).not.toHaveBeenCalled();
     expect(ministryService.update).not.toHaveBeenCalled();
     expect(ministryService.archive).not.toHaveBeenCalled();
+  });
+
+  it("allows only Admin to reactivate a valid Ministry", async () => {
+    const { app, ministryService } = createTestApp();
+    const leaderResponse = await request(app)
+      .patch(`/api/ministries/${ministryId}/reactivate`)
+      .set("Authorization", "Bearer leader-token");
+    expect(leaderResponse.status).toBe(403);
+    expect(ministryService.reactivate).not.toHaveBeenCalled();
+
+    const invalidResponse = await request(app)
+      .patch("/api/ministries/not-a-uuid/reactivate")
+      .set("Authorization", "Bearer admin-token");
+    expect(invalidResponse.status).toBe(400);
+    expect(invalidResponse.body.error).toEqual({
+      code: "INVALID_REQUEST",
+      message: "Ministry ID must be a valid UUID.",
+    });
+    expect(ministryService.reactivate).not.toHaveBeenCalled();
+
+    const adminResponse = await request(app)
+      .patch(`/api/ministries/${ministryId}/reactivate`)
+      .set("Authorization", "Bearer admin-token");
+    expect(adminResponse.status).toBe(200);
+    expect(adminResponse.body.data).toMatchObject({ id: ministryId, isActive: true });
+    expect(ministryService.reactivate).toHaveBeenCalledWith(ministryId);
+  });
+
+  it("passes through Ministry not found on reactivation", async () => {
+    const ministryService = createMinistryService();
+    vi.mocked(ministryService.reactivate).mockRejectedValueOnce(
+      new MinistryServiceError(404, "MINISTRY_NOT_FOUND", "Ministry was not found."),
+    );
+    const { app } = createTestApp(ministryService);
+    const response = await request(app)
+      .patch(`/api/ministries/${ministryId}/reactivate`)
+      .set("Authorization", "Bearer admin-token");
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toEqual({
+      code: "MINISTRY_NOT_FOUND",
+      message: "Ministry was not found.",
+    });
   });
 
   it("allows Admin to assign and remove only the join relationship", async () => {

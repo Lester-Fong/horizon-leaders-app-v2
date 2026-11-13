@@ -25,7 +25,7 @@ function eventService(): EventService {
     addAttendance: vi.fn(async () => ({ memberId, result: "recorded" })),
     addAttendanceByQr: vi.fn(async () => ({ member: { attendanceStatus: "present", email: null, firstName: "Mara", id: memberId, isActive: true, isPresent: true, lastName: "Member", lifeGroup: { id: eventId, name: "North" }, phone: null }, result: "recorded" })),
     close: vi.fn(async () => ({ ...sundayService, status: "closed" })),
-    create: vi.fn(async () => sundayService), getAttendance: vi.fn(async () => ({ members: [] })),
+    create: vi.fn(async () => sundayService), getAttendance: vi.fn(async () => ({ isUnassignedLeader: false, members: [] })),
     getById: vi.fn(async () => sundayService), list: vi.fn(async () => ({ events: [sundayService] })),
     listVisitors: vi.fn(async () => ({ registrations: [] })),
     registerExistingVisitor: vi.fn(async () => ({ result: "registered", visitorId })),
@@ -72,4 +72,15 @@ describe("Sunday Service Event API", () => {
   });
 
   it("does not expose Event hard-delete or reopen routes", async () => { const { app } = setup(); expect((await bearer(request(app).delete(`/api/events/${eventId}`))).status).toBe(404); expect((await bearer(request(app).post(`/api/events/${eventId}/reopen`))).status).toBe(404); });
+
+  it("answers 400 instead of hanging when an edit or new Visitor request has no body", async () => {
+    const { app, service } = setup();
+    const patch = await bearer(request(app).patch(`/api/events/${eventId}`));
+    const newVisitor = await bearer(request(app).post(`/api/events/${eventId}/visitors/new`), "leader");
+    const arrayBody = await bearer(request(app).patch(`/api/events/${eventId}`)).send([]);
+    expect([patch.status, newVisitor.status, arrayBody.status]).toEqual([400, 400, 400]);
+    expect(patch.body.error.code).toBe("INVALID_REQUEST");
+    expect(service.update).not.toHaveBeenCalled();
+    expect(service.registerNewVisitor).not.toHaveBeenCalled();
+  });
 });

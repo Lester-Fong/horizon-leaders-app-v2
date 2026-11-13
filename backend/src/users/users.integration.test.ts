@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../app.js";
 import { createSupabaseAuthService } from "../auth/supabase-auth-service.js";
+import { createSupabaseLifeGroupService } from "../life-groups/supabase-life-group-service.js";
 import type { Database } from "../types/database.types.js";
 import { createSupabaseUserService } from "./supabase-user-service.js";
 
@@ -38,6 +39,10 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
       serviceRoleKey: integrationServiceRoleKey,
       supabaseUrl: integrationSupabaseUrl,
     }),
+  });
+  const lifeGroupService = createSupabaseLifeGroupService({
+    serviceRoleKey: integrationServiceRoleKey,
+    supabaseUrl: integrationSupabaseUrl,
   });
   const createdUserIds = new Set<string>();
   const createdLifeGroupIds: string[] = [];
@@ -240,19 +245,146 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
       details: { changes: { role: { from: "leader", to: "admin" } } },
     });
 
+    // Deleting a user with no Horizon history is a soft delete too: the Profile is kept.
     const removed = await request(app).delete(`/api/users/${userId}`).set(auth);
     expect(removed.status).toBe(200);
     const { data: profile } = await adminClient
       .from("profiles")
-      .select("id")
+      .select("id, is_active, deleted_at")
       .eq("id", userId)
-      .maybeSingle();
-    expect(profile).toBeNull();
-    const missing = await request(app).get(`/api/users/${userId}`).set(auth);
-    expect(missing.status).toBe(404);
+      .single();
+    expect(profile).toMatchObject({ id: userId, is_active: false });
+    expect(profile?.deleted_at).not.toBeNull();
+    const kept = await request(app).get(`/api/users/${userId}`).set(auth);
+    expect(kept.status).toBe(200);
+    expect(kept.body.data).toMatchObject({ email, isActive: false });
+    expect(kept.body.data.deletedAt).not.toBeNull();
   });
 
-  it("keeps history-bearing and own accounts safe", async () => {
+  it("deletes a Leader's sign-in but keeps their history", async () => {
+    const admin = await createAdminSession();
+    const auth = { Authorization: `Bearer ${admin.token}` };
+    const email = uniqueEmail("history");
+    const password = "Welcome2Horizon";
+
+    const leader = await request(app).post("/api/users").set(auth).send({
+      email,
+      name: "History Leader",
+      password,
+      role: "leader",
+    });
+    expect(leader.status).toBe(201);
+    const leaderId: string = leader.body.data.id;
+    createdUserIds.add(leaderId);
+
+    const { data: group, error: groupError } = await adminClient
+      .from("life_groups")
+      .insert({ leader_profile_id: leaderId, name: `Users Group ${randomUUID()}` })
+      .select("id")
+      .single();
+    if (groupError) throw groupError;
+    createdLifeGroupIds.push(group.id);
+
+    const leaderLogin = await signIn(email, password);
+    expect(leaderLogin.error).toBeNull();
+    const leaderAuth = { Authorization: `Bearer ${leaderLogin.token}` };
+    expect((await request(app).get("/api/me").set(leaderAuth)).status).toBe(200);
+
+    const removed = await request(app).delete(`/api/users/${leaderId}`).set(auth);
+    expect(removed.status).toBe(200);
+
+    const { data: profile } = await adminClient
+      .from("profiles")
+      .select("is_active, deleted_at")
+      .eq("id", leaderId)
+      .single();
+    expect(profile?.is_active).toBe(false);
+    expect(profile?.deleted_at).not.toBeNull();
+
+    const { data: authAfter } = await adminClient.auth.admin.getUserById(leaderId);
+    expect(authAfter.user?.email).toBe(`deleted+${leaderId}@deleted.invalid`);
+    expect(authAfter.user?.app_metadata).toMatchObject({ deleted: true, deleted_email: email });
+    expect(Date.parse(authAfter.user?.banned_until ?? "")).toBeGreaterThan(
+      Date.now() + 50 * 365 * 24 * 60 * 60 * 1000,
+    );
+
+    // The old password and the pre-delete session no longer work.
+    expect((await signIn(email, password)).error).not.toBeNull();
+    expect([401, 403]).toContain((await request(app).get("/api/me").set(leaderAuth)).status);
+
+    // The Life Group still points at the deleted Leader, who is flagged as deleted.
+    const { data: groupAfter } = await adminClient
+      .from("life_groups")
+      .select("leader_profile_id")
+      .eq("id", group.id)
+      .single();
+    expect(groupAfter?.leader_profile_id).toBe(leaderId);
+    const lifeGroup = await lifeGroupService.getById(group.id);
+    expect(lifeGroup.leader).toMatchObject({ id: leaderId, isActive: false, isDeleted: true });
+    const options = await lifeGroupService.listLeaderOptions();
+    expect(options.find((option) => option.id === leaderId)?.isDeleted).toBe(true);
+
+    const deletedList = await request(app)
+      .get(`/api/users?status=deleted&search=${encodeURIComponent(email)}`)
+      .set(auth);
+    expect(deletedList.status).toBe(200);
+    expect(deletedList.body.data).toHaveLength(1);
+    expect(deletedList.body.data[0]).toMatchObject({ email, id: leaderId, isActive: false });
+    for (const status of ["all", "inactive", "active"]) {
+      const listed = await request(app)
+        .get(`/api/users?status=${status}&search=${encodeURIComponent(email)}`)
+        .set(auth);
+      expect(listed.body.data).toEqual([]);
+    }
+
+    const mutations = [
+      await request(app).patch(`/api/users/${leaderId}`).set(auth).send({ name: "Changed" }),
+      await request(app).patch(`/api/users/${leaderId}/status`).set(auth).send({ isActive: true }),
+      await request(app).put(`/api/users/${leaderId}/password`).set(auth).send({ password }),
+      await request(app).delete(`/api/users/${leaderId}`).set(auth),
+    ];
+    for (const response of mutations) {
+      expect(response.status).toBe(409);
+      expect(response.body.error.code).toBe("USER_DELETED");
+    }
+
+    const activity = await request(app).get(`/api/users/${leaderId}/activity`).set(auth);
+    expect(activity.status).toBe(200);
+    const deletion = activity.body.data.find(
+      (event: { action: string }) => event.action === "user_deleted",
+    );
+    expect(deletion).toMatchObject({
+      actorId: admin.id,
+      details: { email, mode: "soft", role: "leader", wasActive: true },
+    });
+
+    // The original email is free for a new account.
+    const replacement = await request(app).post("/api/users").set(auth).send({
+      email,
+      name: "Replacement Leader",
+      password,
+      role: "leader",
+    });
+    expect(replacement.status).toBe(201);
+    createdUserIds.add(replacement.body.data.id);
+    expect(replacement.body.data.id).not.toBe(leaderId);
+    expect((await signIn(email, password)).error).toBeNull();
+  });
+
+  it("lets an Admin deactivate another Admin while an active Admin remains", async () => {
+    const admin = await createAdminSession();
+    const otherAdmin = await createAdminSession();
+    const auth = { Authorization: `Bearer ${admin.token}` };
+
+    const deactivated = await request(app)
+      .patch(`/api/users/${otherAdmin.id}/status`)
+      .set(auth)
+      .send({ isActive: false });
+    expect(deactivated.status).toBe(200);
+    expect(deactivated.body.data).toMatchObject({ isActive: false, role: "admin" });
+  });
+
+  it("keeps assigned and own accounts safe", async () => {
     const admin = await createAdminSession();
     const auth = { Authorization: `Bearer ${admin.token}` };
 
@@ -276,10 +408,6 @@ describeWithLocalSupabase("Users API with local Supabase", () => {
 
     const assigned = await request(app).get(`/api/users/${leaderId}`).set(auth);
     expect(assigned.body.data.assignedLifeGroup).toMatchObject({ id: group.id, name: group.name });
-
-    const blockedDelete = await request(app).delete(`/api/users/${leaderId}`).set(auth);
-    expect(blockedDelete.status).toBe(409);
-    expect(blockedDelete.body.error.code).toBe("USER_HAS_HISTORY");
 
     // Allowed with a UI warning: the Life Group keeps its pointer until reassigned.
     const promoted = await request(app)

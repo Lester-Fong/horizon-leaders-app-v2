@@ -8,6 +8,7 @@ import type { DashboardData, DashboardService } from "../dashboard/types.js";
 const admin: HorizonActor = { id: "11111111-1111-4111-8111-111111111111", isActive: true, name: "Admin", role: "admin" };
 const leader: HorizonActor = { id: "22222222-2222-4222-8222-222222222222", isActive: true, name: "Leader", role: "leader" };
 const dashboard: DashboardData = {
+  isUnassignedLeader: false,
   memberSnapshot: { age: [], gender: [] }, metrics: { activeFollowUps: 0, activeOpenCellProgrammes: 0 },
   needsAttention: { byReason: [], total: 0 }, openCell: { activeProgrammes: 0, currentParticipants: 0 },
   recentUpcoming: { recent: [], upcoming: [] }, sundayAttendance: { averageRate: null, points: [] },

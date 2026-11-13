@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(15);
+select plan(29);
 
 select has_function(
   'public',
@@ -113,6 +113,94 @@ select throws_ok(
   '23514',
   null,
   'user_audit_events rejects unknown actions'
+);
+
+-- Last active Admin rule (DEC-075).
+select has_trigger('public', 'profiles', 'require_active_admin', 'profiles has the active Admin trigger');
+
+select ok(
+  not has_function_privilege('anon', 'public.require_active_admin()', 'execute')
+  and not has_function_privilege('authenticated', 'public.require_active_admin()', 'execute'),
+  'browser roles cannot execute require_active_admin'
+);
+
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('c1111111-1111-4111-8111-111111111111', 'admin.one@example.test', '{"name":"Admin One"}'),
+  ('c2222222-2222-4222-8222-222222222222', 'admin.two@example.test', '{"name":"Admin Two"}');
+
+update public.profiles set role = 'admin'
+where id in ('c1111111-1111-4111-8111-111111111111', 'c2222222-2222-4222-8222-222222222222');
+
+-- Leave the two test Admins as the only active Admins in this transaction.
+select lives_ok(
+  $$update public.profiles set role = 'leader'
+    where role = 'admin'
+      and id not in ('c1111111-1111-4111-8111-111111111111', 'c2222222-2222-4222-8222-222222222222')$$,
+  'other Admins can be demoted while an active Admin remains'
+);
+
+select lives_ok(
+  $$update public.profiles set is_active = false where id = 'c2222222-2222-4222-8222-222222222222'$$,
+  'one of two active Admins can be deactivated'
+);
+
+select throws_ok(
+  $$update public.profiles set is_active = false where id = 'c1111111-1111-4111-8111-111111111111'$$,
+  '23514',
+  'profiles_active_admin_required: At least one active Admin is required',
+  'the last active Admin cannot be deactivated'
+);
+
+select throws_ok(
+  $$update public.profiles set role = 'leader' where id = 'c1111111-1111-4111-8111-111111111111'$$,
+  '23514',
+  'profiles_active_admin_required: At least one active Admin is required',
+  'the last active Admin cannot be demoted'
+);
+
+select throws_ok(
+  $$update public.profiles set is_active = false, deleted_at = now()
+    where id = 'c1111111-1111-4111-8111-111111111111'$$,
+  '23514',
+  'profiles_active_admin_required: At least one active Admin is required',
+  'the last active Admin cannot be soft deleted'
+);
+
+select lives_ok(
+  $$update public.profiles set name = 'Admin One Renamed' where id = 'c1111111-1111-4111-8111-111111111111'$$,
+  'the last active Admin can be renamed'
+);
+
+select lives_ok(
+  $$update public.profiles set is_active = false where id = 'a1111111-1111-4111-8111-111111111111'$$,
+  'Leader updates are not affected'
+);
+
+select lives_ok(
+  $$update public.profiles set is_active = true where id = 'c2222222-2222-4222-8222-222222222222'$$,
+  'an inactive Admin can be reactivated'
+);
+
+select lives_ok(
+  $$update public.profiles set role = 'leader' where id = 'c1111111-1111-4111-8111-111111111111'$$,
+  'an Admin can be demoted once another Admin is active again'
+);
+
+-- Soft delete (DEC-075).
+select has_column('public', 'profiles', 'deleted_at', 'profiles has deleted_at');
+
+select throws_ok(
+  $$update public.profiles set deleted_at = now(), is_active = true
+    where id = 'a2222222-2222-4222-8222-222222222222'$$,
+  '23514',
+  null,
+  'a deleted Profile cannot be active'
+);
+
+select lives_ok(
+  $$update public.profiles set deleted_at = now(), is_active = false
+    where id = 'a2222222-2222-4222-8222-222222222222'$$,
+  'a Profile can be soft deleted while it keeps its Life Group reference'
 );
 
 select * from finish();

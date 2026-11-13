@@ -84,6 +84,7 @@ export interface MinistryService {
     actor: HorizonActor,
     ministryId: string,
   ): Promise<MinistryMember[]>;
+  reactivate(ministryId: string): Promise<Ministry>;
   removeMember(
     actor: HorizonActor,
     ministryId: string,

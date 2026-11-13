@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
 import { CHURCH_TIME_ZONE } from "../config/constants.js";
+import { chunk, fetchAllRows, fetchRowsByIds } from "../db/range-queries.js";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "../types/database.types.js";
 import {
   EventServiceError,
@@ -18,6 +19,7 @@ interface Config {
   supabaseUrl: string;
 }
 type EventRow = Omit<Tables<"events">, "image_path">;
+type CountTable = "sunday_service_presence" | "sunday_service_eligibility" | "sunday_service_visitor_registrations";
 type MemberRow = Pick<Tables<"members">, "created_at" | "email" | "first_name" | "id" | "is_active" | "last_name" | "life_group_id" | "phone">;
 
 const EVENT_COLUMNS = "id, type, status, title, event_date, location, description, counts_for_absence, created_by_profile_id, created_at, updated_at";
@@ -49,12 +51,18 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
-  async function leaderGroupId(actor: HorizonActor) {
+  /** Admin: undefined (all groups). Leader: their group ID, or null when they lead no Life Group. */
+  async function leaderScope(actor: HorizonActor) {
     if (actor.role === "admin") return undefined;
     const { data, error } = await supabase.from("life_groups").select("id").eq("leader_profile_id", actor.id).maybeSingle();
     if (error) throw unavailable();
-    if (!data) throw forbidden("A current Life Group assignment is required.");
-    return data.id;
+    return data?.id ?? null;
+  }
+
+  async function leaderGroupId(actor: HorizonActor) {
+    const groupId = await leaderScope(actor);
+    if (groupId === null) throw forbidden("A current Life Group assignment is required.");
+    return groupId;
   }
 
   async function eventRow(eventId: string) {
@@ -64,12 +72,26 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     return data;
   }
 
-  async function counts(eventIds: string[], table: "sunday_service_presence" | "sunday_service_eligibility" | "sunday_service_visitor_registrations") {
+  /** Reads one event_id per row, in batches, ordered by a unique (event, person) key. */
+  function eventIdRows(table: CountTable, ids: string[]) {
+    switch (table) {
+      case "sunday_service_presence":
+        return fetchAllRows(() => supabase.from(table).select("event_id").in("event_id", ids).order("event_id").order("member_id"));
+      case "sunday_service_eligibility":
+        return fetchAllRows(() => supabase.from(table).select("event_id").in("event_id", ids).order("event_id").order("member_id"));
+      case "sunday_service_visitor_registrations":
+        return fetchAllRows(() => supabase.from(table).select("event_id").in("event_id", ids).order("event_id").order("visitor_id"));
+    }
+  }
+
+  async function counts(eventIds: string[], table: CountTable) {
     const result = new Map<string, number>();
     if (eventIds.length === 0) return result;
-    const { data, error } = await supabase.from(table).select("event_id").in("event_id", eventIds);
-    if (error) throw unavailable();
-    for (const row of data) result.set(row.event_id, (result.get(row.event_id) ?? 0) + 1);
+    const results = await Promise.all(chunk(eventIds).map((ids) => eventIdRows(table, ids)));
+    for (const { data, error } of results) {
+      if (error) throw unavailable();
+      for (const row of data) result.set(row.event_id, (result.get(row.event_id) ?? 0) + 1);
+    }
     return result;
   }
 
@@ -80,7 +102,7 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     const [attendance, eligibility, visitors, profilesResult] = await Promise.all([
       counts(ids, "sunday_service_presence"), counts(ids, "sunday_service_eligibility"),
       counts(ids, "sunday_service_visitor_registrations"),
-      supabase.from("profiles").select("id, name").in("id", profileIds),
+      fetchRowsByIds(profileIds, (idChunk) => supabase.from("profiles").select("id, name").in("id", idChunk)),
     ]);
     if (profilesResult.error) throw unavailable();
     const names = new Map(profilesResult.data.map((profile) => [profile.id, profile.name]));
@@ -110,7 +132,7 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
   async function groupNames(ids: string[]) {
     const unique = [...new Set(ids)];
     if (unique.length === 0) return new Map<string, string>();
-    const { data, error } = await supabase.from("life_groups").select("id, name").in("id", unique);
+    const { data, error } = await fetchRowsByIds(unique, (idChunk) => supabase.from("life_groups").select("id, name").in("id", idChunk));
     if (error) throw unavailable();
     return new Map(data.map((row) => [row.id, row.name]));
   }
@@ -142,27 +164,31 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     };
   }
 
-  async function attendanceRows(actor: HorizonActor, event: EventRow) {
-    const groupId = await leaderGroupId(actor);
-    const { data: presence, error: presenceError } = await supabase.from("sunday_service_presence").select("member_id").eq("event_id", event.id);
+  /** `groupId` undefined means every Life Group (Admin); otherwise the Leader's own group. */
+  async function attendanceRows(event: EventRow, groupId: string | undefined) {
+    const { data: presence, error: presenceError } = await fetchAllRows(() => supabase.from("sunday_service_presence").select("member_id").eq("event_id", event.id).order("member_id"));
     if (presenceError) throw unavailable();
     const present = new Set(presence.map((row) => row.member_id));
     let members: MemberRow[];
     let snapshotGroups = new Map<string, string>();
     if (event.status === "closed") {
-      let snapshotQuery = supabase.from("sunday_service_eligibility").select("member_id, life_group_id_at_close").eq("event_id", event.id);
-      if (groupId) snapshotQuery = snapshotQuery.eq("life_group_id_at_close", groupId);
-      const { data: snapshot, error } = await snapshotQuery;
+      const { data: snapshot, error } = await fetchAllRows(() => {
+        let snapshotQuery = supabase.from("sunday_service_eligibility").select("member_id, life_group_id_at_close").eq("event_id", event.id);
+        if (groupId) snapshotQuery = snapshotQuery.eq("life_group_id_at_close", groupId);
+        return snapshotQuery.order("member_id");
+      });
       if (error) throw unavailable();
       if (snapshot.length === 0) return [];
       snapshotGroups = new Map(snapshot.map((row) => [row.member_id, row.life_group_id_at_close]));
-      const { data, error: membersError } = await supabase.from("members").select(MEMBER_COLUMNS).in("id", snapshot.map((row) => row.member_id));
+      const { data, error: membersError } = await fetchRowsByIds(snapshot.map((row) => row.member_id), (idChunk) => supabase.from("members").select(MEMBER_COLUMNS).in("id", idChunk));
       if (membersError) throw unavailable();
       members = data;
     } else {
-      let memberQuery = supabase.from("members").select(MEMBER_COLUMNS).eq("is_active", true);
-      if (groupId) memberQuery = memberQuery.eq("life_group_id", groupId);
-      const { data, error } = await memberQuery;
+      const { data, error } = await fetchAllRows(() => {
+        let memberQuery = supabase.from("members").select(MEMBER_COLUMNS).eq("is_active", true);
+        if (groupId) memberQuery = memberQuery.eq("life_group_id", groupId);
+        return memberQuery.order("id");
+      });
       if (error) throw unavailable();
       members = data.filter((member) => isEligibleOn(member, event.event_date));
     }
@@ -250,7 +276,7 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
 
   return {
     async list() {
-      const { data, error } = await supabase.from("events").select(EVENT_COLUMNS).eq("type", "service").order("event_date", { ascending: false }).order("created_at", { ascending: false });
+      const { data, error } = await fetchAllRows(() => supabase.from("events").select(EVENT_COLUMNS).eq("type", "service").order("event_date", { ascending: false }).order("created_at", { ascending: false }).order("id"));
       if (error) throw unavailable();
       return { events: await hydrate(data) };
     },
@@ -267,7 +293,9 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     async update(actor, eventId, input) {
       if (actor.role !== "admin") throw forbidden();
       const event = await eventRow(eventId);
-      if (input.eventDate !== undefined) {
+      // Re-sending the stored date is not a date change, so it never trips the date lock.
+      const newEventDate = input.eventDate !== undefined && input.eventDate !== event.event_date ? input.eventDate : undefined;
+      if (newEventDate !== undefined) {
         if (event.status === "closed") throw new EventServiceError(422, "EVENT_ACTIVITY_LOCKS_DATE", "A closed Service date cannot be changed.");
         const [presence, visitors] = await Promise.all([
           supabase.from("sunday_service_presence").select("member_id", { count: "exact", head: true }).eq("event_id", eventId),
@@ -284,7 +312,7 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
       const update: TablesUpdate<"events"> = {};
       if (input.countsForAbsence !== undefined && event.status === "open") update.counts_for_absence = input.countsForAbsence;
       if (input.description !== undefined) update.description = input.description;
-      if (input.eventDate !== undefined) update.event_date = input.eventDate;
+      if (newEventDate !== undefined) update.event_date = newEventDate;
       if (input.location !== undefined) update.location = input.location;
       if (input.title !== undefined) update.title = input.title;
       if (Object.keys(update).length === 0) return hydrateOne(await eventRow(eventId));
@@ -304,7 +332,13 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
       if (outcome !== "closed") throw unavailable();
       return hydrateOne(await eventRow(eventId));
     },
-    async getAttendance(actor, eventId) { return { members: await attendanceRows(actor, await eventRow(eventId)) }; },
+    async getAttendance(actor, eventId) {
+      const event = await eventRow(eventId);
+      const groupId = await leaderScope(actor);
+      // A Leader without a Life Group has no Members in scope: an empty roster, not an error.
+      if (groupId === null) return { isUnassignedLeader: true, members: [] };
+      return { isUnassignedLeader: false, members: await attendanceRows(event, groupId) };
+    },
     async addAttendance(actor, eventId, memberId) {
       const result = await recordPresence(actor, await eventRow(eventId), memberId);
       return { memberId: result.member.id, result: result.result };
@@ -344,14 +378,14 @@ export function createSupabaseEventService({ fetchImpl, serviceRoleKey, supabase
     },
     async listVisitors(_actor, eventId) {
       await eventRow(eventId);
-      const { data: rows, error } = await supabase.from("sunday_service_visitor_registrations").select("visitor_id, registered_by_profile_id, created_at").eq("event_id", eventId).order("created_at");
+      const { data: rows, error } = await fetchAllRows(() => supabase.from("sunday_service_visitor_registrations").select("visitor_id, registered_by_profile_id, created_at").eq("event_id", eventId).order("created_at").order("visitor_id"));
       if (error) throw unavailable();
       if (rows.length === 0) return { registrations: [] };
       const visitorIds = rows.map((row) => row.visitor_id);
       const actorIds = [...new Set(rows.map((row) => row.registered_by_profile_id))];
       const [visitorsResult, actorsResult] = await Promise.all([
-        supabase.from("visitors").select("id, first_name, last_name, phone, email, status").in("id", visitorIds),
-        supabase.from("profiles").select("id, name").in("id", actorIds),
+        fetchRowsByIds(visitorIds, (idChunk) => supabase.from("visitors").select("id, first_name, last_name, phone, email, status").in("id", idChunk)),
+        fetchRowsByIds(actorIds, (idChunk) => supabase.from("profiles").select("id, name").in("id", idChunk)),
       ]);
       if (visitorsResult.error || actorsResult.error) throw unavailable();
       const visitors = new Map(visitorsResult.data.map((row) => [row.id, row]));

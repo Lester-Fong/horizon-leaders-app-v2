@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
+import { churchDate } from "../config/church-date.js";
 import { CHURCH_TIME_ZONE } from "../config/constants.js";
 import type { Database } from "../types/database.overrides.js";
 import type { Tables } from "../types/database.types.js";
@@ -12,7 +13,7 @@ import {
   type DashboardService,
 } from "./types.js";
 
-interface Config { serviceRoleKey: string; supabaseUrl: string }
+interface Config { fetchImpl?: typeof globalThis.fetch; serviceRoleKey: string; supabaseUrl: string }
 type EventRow = Pick<Tables<"events">, "counts_for_absence" | "event_date" | "id" | "status" | "title" | "type">;
 
 const REASONS: FollowUpReason[] = [
@@ -44,11 +45,15 @@ function localYearStart() {
   return `${localDateParts().year}-01-01`;
 }
 
-function localMonthBounds() {
-  const parts = localDateParts();
-  const start = `${parts.year}-${parts.month}-01`;
-  const nextMonth = new Date(Date.UTC(Number(parts.year), Number(parts.month), 1));
-  return { end: nextMonth.toISOString(), start: new Date(`${start}T00:00:00+08:00`).toISOString() };
+/** The current church-calendar month as [start, end) instants; Asia/Manila is a fixed +08:00 offset. */
+export function localMonthBounds(now = new Date()) {
+  const parts = localDateParts(now);
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const monthStart = (y: number, m: number) => new Date(`${y}-${String(m).padStart(2, "0")}-01T00:00:00+08:00`).toISOString();
+  return { end: monthStart(nextYear, nextMonth), start: monthStart(year, month) };
 }
 
 const AGE_LABELS: Record<string, string> = {
@@ -66,34 +71,45 @@ function breakdown(keys: string[], counts: Map<string, number>, labels: Record<s
   }));
 }
 
-export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: Config): DashboardService {
-  const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false } });
+export function createSupabaseDashboardService({ fetchImpl, serviceRoleKey, supabaseUrl }: Config): DashboardService {
+  const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
+  });
 
+  /** Admin: undefined. Leader: their Life Group ID, or null when they lead no Life Group. */
   async function leaderGroup(actor: HorizonActor) {
     if (actor.role !== "leader") return undefined;
     const { data, error } = await supabase.from("life_groups").select("id").eq("leader_profile_id", actor.id).maybeSingle();
     if (error) unavailable();
-    if (!data) throw new DashboardServiceError(404, "LIFE_GROUP_SCOPE_NOT_FOUND", "Your assigned Life Group was not found.");
-    return data.id;
+    return data?.id ?? null;
   }
 
   return {
     async get(actor, options): Promise<DashboardData> {
       const ownGroup = await leaderGroup(actor);
-      const groupId = actor.role === "leader" ? ownGroup : undefined;
-      const chartGroupId = actor.role === "leader" ? ownGroup : options.lifeGroupId;
+      // A Leader without a Life Group has no group-scoped data: zero/empty values, never church-wide rows.
+      const isUnassignedLeader = ownGroup === null;
+      const groupId = actor.role === "leader" ? ownGroup ?? undefined : undefined;
+      const chartGroupId = actor.role === "leader" ? ownGroup ?? undefined : options.lifeGroupId;
       const today = localToday();
       const month = localMonthBounds();
-      const visitorQuery = supabase.from("visitors").select("id", { count: "exact", head: true }).eq("status", "active");
-      if (groupId) visitorQuery.eq("life_group_id", groupId);
+      const noRows = { data: [], error: null };
+      const visitorQuery = isUnassignedLeader
+        ? Promise.resolve({ count: 0, error: null })
+        : groupId
+          ? supabase.from("visitors").select("id", { count: "exact", head: true }).eq("status", "active").eq("life_group_id", groupId)
+          : supabase.from("visitors").select("id", { count: "exact", head: true }).eq("status", "active");
       const newVisitorsQuery = actor.role === "admin"
         ? supabase.from("visitors").select("id", { count: "exact", head: true }).gte("created_at", month.start).lt("created_at", month.end)
         : Promise.resolve({ count: 0, error: null });
       const [demographicsResult, visitorsResult, activeProgrammeCountResult, activeEnrollmentCountResult, newVisitorsResult, followUpResults] = await Promise.all([
-        supabase.rpc("dashboard_member_demographics", {
-          p_as_of_date: today,
-          p_life_group_id: groupId ?? null,
-        }),
+        isUnassignedLeader
+          ? Promise.resolve(noRows)
+          : supabase.rpc("dashboard_member_demographics", {
+            p_as_of_date: today,
+            p_life_group_id: groupId ?? null,
+          }),
         visitorQuery,
         supabase.from("opencell_programmes").select("id", { count: "exact", head: true }).eq("status", "active"),
         // One active enrollment per Visitor is enforced by the OpenCell schema,
@@ -131,7 +147,7 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
         .eq("type", "service").eq("status", "closed").eq("counts_for_absence", true)
         .lte("event_date", today).order("event_date", { ascending: false }).limit(periodLimit);
       if (options.period === "year") eventQuery.gte("event_date", localYearStart()).lte("event_date", today);
-      const eventsResult = await eventQuery;
+      const eventsResult = isUnassignedLeader ? noRows : await eventQuery;
       if (eventsResult.error) unavailable();
       const events = (eventsResult.data ?? []) as EventRow[];
       const eventIds = events.map((event) => event.id);
@@ -158,7 +174,7 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       const gatheringQuery = supabase.from("life_group_gatherings").select("id, gathering_date, title, life_group_id").lt("gathering_date", today).order("gathering_date", { ascending: false }).limit(6);
       if (groupId) gatheringQuery.eq("life_group_id", groupId);
       const [gatheringsResult, finishedResult] = await Promise.all([
-        gatheringQuery,
+        isUnassignedLeader ? noRows : gatheringQuery,
         supabase.from("opencell_programmes").select("id, name, finished_at").eq("status", "finished").order("finished_at", { ascending: false }).limit(6),
       ]);
       if (upcomingEvents.error || upcomingSessions.error || gatheringsResult.error || finishedResult.error) unavailable();
@@ -168,10 +184,11 @@ export function createSupabaseDashboardService({ serviceRoleKey, supabaseUrl }: 
       ].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
       const recent = [
         ...(gatheringsResult.data ?? []).map((row) => ({ context: "Life Group Gathering", date: row.gathering_date, href: `/life-groups/${row.life_group_id}/gatherings`, id: row.id, kind: "gathering", status: "recent", title: row.title ?? "Life Group Gathering" })),
-        ...(finishedResult.data ?? []).filter((row) => row.finished_at).map((row) => ({ context: "OpenCell", date: row.finished_at!.slice(0, 10), href: "/opencell", id: row.id, kind: "opencell_programme", status: "finished", title: row.name })),
+        ...(finishedResult.data ?? []).filter((row) => row.finished_at).map((row) => ({ context: "OpenCell", date: churchDate(new Date(row.finished_at!)), href: "/opencell", id: row.id, kind: "opencell_programme", status: "finished", title: row.name })),
       ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
 
       return {
+        isUnassignedLeader,
         memberSnapshot: { age: breakdown(["under_18", "18_24", "25_34", "35_44", "45_54", "55_plus", "not_set"], memberAge, AGE_LABELS, activeMemberCount), gender: breakdown(["male", "female", "not_set"], memberGender, GENDER_LABELS, activeMemberCount) },
         metrics: actor.role === "admin"
           ? { activeFollowUps: activeFollowUpCount, activeMembers: activeMemberCount, activeOpenCellProgrammes: activeProgrammeCount, activeVisitors: activeVisitorCount, newVisitorsThisMonth: newVisitorsResult.count ?? 0 }

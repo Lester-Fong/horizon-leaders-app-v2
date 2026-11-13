@@ -1,4 +1,4 @@
-import { UserX } from 'lucide-react'
+import { Trash2, UserX, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -17,9 +17,40 @@ import { getLedActiveGroup } from './ledLifeGroup'
 /** Select value meaning the Admin explicitly chose to hand the group over later. */
 const REASSIGN_LATER = 'reassign-later'
 
+export type RemoveUserMode = 'deactivate' | 'delete'
+
+interface ModeCopy {
+  confirmLabel: string
+  describe(name: string): string
+  icon: LucideIcon
+  title: string
+  verb: string
+}
+
+const MODE_COPY: Record<RemoveUserMode, ModeCopy> = {
+  deactivate: {
+    confirmLabel: 'Deactivate user',
+    describe: (name) =>
+      `${name} will be signed out and lose access to Horizon immediately. Their history is kept and an Admin can reactivate them later.`,
+    icon: UserX,
+    title: 'Deactivate user?',
+    verb: 'deactivate',
+  },
+  delete: {
+    confirmLabel: 'Delete user',
+    describe: (name) =>
+      `${name}'s sign-in will be removed permanently and they will leave the Users list. Their name stays on past Horizon records and in the activity log, and the email can be used for a new account. This cannot be undone.`,
+    icon: Trash2,
+    title: 'Delete user?',
+    verb: 'delete',
+  },
+}
+
 interface DeactivateUserDialogProps {
   error: string | null
   isSubmitting: boolean
+  /** Deactivating can be undone later; deleting removes the sign-in for good. */
+  mode?: RemoveUserMode
   onClose(): void
   /** Called with the chosen successor's id, or '' when the group is reassigned later. */
   onConfirm(replacementLeaderId: string): void
@@ -37,13 +68,20 @@ function getLoadErrorMessage(error: unknown) {
   return 'Leaders could not be loaded. You can still reassign the group later.'
 }
 
+/**
+ * Confirms deactivating or deleting a user. When they lead an active Life Group,
+ * the Admin first chooses a successor or explicitly reassigns the group later.
+ */
 export function DeactivateUserDialog({
   error,
   isSubmitting,
+  mode = 'deactivate',
   onClose,
   onConfirm,
   user,
 }: DeactivateUserDialogProps) {
+  const copy = MODE_COPY[mode]
+  const ConfirmIcon = copy.icon
   const ledGroup = getLedActiveGroup(user)
   const ledGroupId = ledGroup?.id
   const [loaded, setLoaded] = useState<LoadedReplacements | null>(null)
@@ -60,7 +98,11 @@ export function DeactivateUserDialog({
         setLoaded({
           error: null,
           options: options.filter(
-            (option) => option.isActive && option.id !== user.id && !option.assignedLifeGroup,
+            (option) =>
+              option.isActive &&
+              !option.isDeleted &&
+              option.id !== user.id &&
+              !option.assignedLifeGroup,
           ),
           userId: user.id,
         })
@@ -97,13 +139,13 @@ export function DeactivateUserDialog({
       isOpen
       onClose={onClose}
       preventClose={isSubmitting}
-      title="Deactivate user?"
-      description={`${user.name} will be signed out and lose access to Horizon immediately. Their history is kept and an Admin can reactivate them later.`}
+      title={copy.title}
+      description={copy.describe(user.name)}
     >
       {ledGroup && (
         <div className="mb-5 space-y-3">
           <FeedbackBanner tone="warning" title="This Leader runs a Life Group">
-            {user.name} leads {ledGroup.name}. Choose who takes over before you deactivate them.
+            {user.name} leads {ledGroup.name}. Choose who takes over before you {copy.verb} them.
           </FeedbackBanner>
           <FormField
             id="replacement-leader"
@@ -157,8 +199,8 @@ export function DeactivateUserDialog({
           disabled={!canConfirm}
           onClick={() => onConfirm(selectedValue === REASSIGN_LATER ? '' : selectedValue)}
         >
-          <UserX aria-hidden="true" className="size-4" />
-          Deactivate user
+          <ConfirmIcon aria-hidden="true" className="size-4" />
+          {copy.confirmLabel}
         </Button>
       </div>
     </Modal>

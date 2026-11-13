@@ -234,6 +234,27 @@ export function createMinistriesRouter(
     },
   );
 
+  router.patch(
+    "/ministries/:ministryId/reactivate",
+    authenticated,
+    adminOnly,
+    async (request, response) => {
+      const ministryId = readUuid(request.params.ministryId);
+      if (!ministryId) {
+        sendError(
+          response,
+          400,
+          "INVALID_REQUEST",
+          "Ministry ID must be a valid UUID.",
+        );
+        return;
+      }
+      await handleRequest(response, () =>
+        ministryService.reactivate(ministryId),
+      );
+    },
+  );
+
   router.post(
     "/ministries/:ministryId/members",
     authenticated,

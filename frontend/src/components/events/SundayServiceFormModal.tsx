@@ -7,11 +7,13 @@ import { FormField, TextArea, TextInput } from '../ui/FormControls'
 import { Modal } from '../ui/Modal'
 
 export type ServiceFormContext = { mode: 'create' } | { event: SundayService; mode: 'edit' }
+/** Create always carries `eventDate`; an edit omits it when the date is unchanged, so a locked date is never re-submitted. */
+export type SundayServiceSaveInput = Omit<SundayServiceInput, 'eventDate'> & { eventDate?: string }
 
 export function SundayServiceFormModal({ context, onClose, onSave, onSaved }: {
   context: ServiceFormContext
   onClose(): void
-  onSave(input: SundayServiceInput): Promise<SundayService>
+  onSave(input: SundayServiceSaveInput): Promise<SundayService>
   onSaved(event: SundayService): void
 }) {
   const event = context.mode === 'edit' ? context.event : null
@@ -28,14 +30,15 @@ export function SundayServiceFormModal({ context, onClose, onSave, onSaved }: {
     if (!title.trim() || !eventDate) { setError('Title and date are required.'); return }
     setSaving(true); setError(null)
     try {
-      onSaved(await onSave({ countsForAbsence, description: description.trim() || null, eventDate, location: location.trim() || null, title: title.trim() }))
+      const fields = { countsForAbsence, description: description.trim() || null, location: location.trim() || null, title: title.trim() }
+      onSaved(await onSave(event && eventDate === event.eventDate ? fields : { ...fields, eventDate }))
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'The Sunday Service could not be saved.')
     } finally { setSaving(false) }
   }
 
   const editing = context.mode === 'edit'
-  const dateLocked = event?.status === 'closed'
+  const dateLocked = event?.status === 'closed' || (event?.attendanceCount ?? 0) > 0 || (event?.visitorCount ?? 0) > 0
   return (
     <Modal isOpen onClose={onClose} preventClose={saving} title={editing ? 'Edit Sunday Service' : 'Create Sunday Service'} description="Keep the Service record concise. Attendance and Sunday Visitors are managed from its workspace.">
       {error && <FeedbackBanner className="mb-5" tone="error">{error}</FeedbackBanner>}
@@ -43,7 +46,7 @@ export function SundayServiceFormModal({ context, onClose, onSave, onSaved }: {
         <FormField id="service-title" label="Title" required>
           <TextInput id="service-title" data-modal-autofocus value={title} maxLength={160} disabled={saving} onChange={(change) => setTitle(change.target.value)} />
         </FormField>
-        <FormField id="service-date" label="Date" required description={dateLocked ? 'The close-time attendance snapshot locks this date.' : 'Counting Services must use a Sunday.'}>
+        <FormField id="service-date" label="Date" required description={dateLocked ? 'The date is fixed after check-in or Visitor registration begins, or the Service closes.' : 'Counting Services must use a Sunday.'}>
           <TextInput id="service-date" type="date" value={eventDate} disabled={saving || dateLocked} onChange={(change) => setEventDate(change.target.value)} />
         </FormField>
         <FormField id="service-location" label="Location" description="Optional.">

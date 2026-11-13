@@ -95,6 +95,21 @@ export function createSupabaseMinistryService({
     return data;
   }
 
+  async function setMinistryActive(ministryId: string, isActive: boolean) {
+    const ministry = await getMinistryRow(ministryId);
+    if (ministry.is_active === isActive) return mapMinistry(ministry);
+
+    const { data, error } = await supabase
+      .from("ministries")
+      .update({ is_active: isActive })
+      .eq("id", ministryId)
+      .select(MINISTRY_COLUMNS)
+      .single();
+
+    if (error) throw serviceUnavailable();
+    return mapMinistry(data);
+  }
+
   async function getVisibleMinistryRow(
     actor: HorizonActor,
     ministryId: string,
@@ -209,16 +224,11 @@ export function createSupabaseMinistryService({
     },
 
     async archive(ministryId) {
-      await getMinistryRow(ministryId);
-      const { data, error } = await supabase
-        .from("ministries")
-        .update({ is_active: false })
-        .eq("id", ministryId)
-        .select(MINISTRY_COLUMNS)
-        .single();
+      return setMinistryActive(ministryId, false);
+    },
 
-      if (error) throw serviceUnavailable();
-      return mapMinistry(data);
+    async reactivate(ministryId) {
+      return setMinistryActive(ministryId, true);
     },
 
     async listMembers(actor, ministryId) {

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
+import { chunk, fetchAllRows, fetchRowsByIds } from "../db/range-queries.js";
 import { MemberServiceError, type MemberService } from "../members/types.js";
 import type { Database, Tables, TablesInsert, TablesUpdate } from "../types/database.types.js";
 import {
@@ -11,7 +12,7 @@ import {
   type NewHarvestVisitorInput,
 } from "./types.js";
 
-interface Config { memberService: MemberService; serviceRoleKey: string; supabaseUrl: string }
+interface Config { fetchImpl?: typeof globalThis.fetch; memberService: MemberService; serviceRoleKey: string; supabaseUrl: string }
 type EventRow = Omit<Tables<"events">, "image_path">;
 
 const EVENT_COLUMNS = "id, type, status, title, event_date, location, description, counts_for_absence, created_by_profile_id, created_at, updated_at";
@@ -26,9 +27,10 @@ function forbidden() {
   return new HarvestServiceError(403, "FORBIDDEN", "You do not have permission to perform this action.");
 }
 
-export function createSupabaseHarvestService({ memberService, serviceRoleKey, supabaseUrl }: Config): HarvestService {
+export function createSupabaseHarvestService({ fetchImpl, memberService, serviceRoleKey, supabaseUrl }: Config): HarvestService {
   const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
   async function eventRow(eventId: string) {
@@ -42,13 +44,16 @@ export function createSupabaseHarvestService({ memberService, serviceRoleKey, su
     if (rows.length === 0) return [];
     const eventIds = rows.map((row) => row.id);
     const profileIds = [...new Set(rows.map((row) => row.created_by_profile_id))];
-    const [participations, profiles] = await Promise.all([
-      supabase.from("harvest_participations").select("event_id").in("event_id", eventIds),
-      supabase.from("profiles").select("id, name").in("id", profileIds),
+    const [participationChunks, profiles] = await Promise.all([
+      Promise.all(chunk(eventIds).map((ids) => fetchAllRows(() => supabase.from("harvest_participations").select("event_id").in("event_id", ids).order("event_id").order("visitor_id")))),
+      fetchRowsByIds(profileIds, (idChunk) => supabase.from("profiles").select("id, name").in("id", idChunk)),
     ]);
-    if (participations.error || profiles.error) throw unavailable();
+    if (profiles.error) throw unavailable();
     const counts = new Map<string, number>();
-    for (const row of participations.data) counts.set(row.event_id, (counts.get(row.event_id) ?? 0) + 1);
+    for (const { data, error } of participationChunks) {
+      if (error) throw unavailable();
+      for (const row of data) counts.set(row.event_id, (counts.get(row.event_id) ?? 0) + 1);
+    }
     const names = new Map(profiles.data.map((profile) => [profile.id, profile.name]));
     return rows.map((row) => ({
       countsForAbsence: false,
@@ -121,7 +126,7 @@ export function createSupabaseHarvestService({ memberService, serviceRoleKey, su
 
   return {
     async list() {
-      const { data, error } = await supabase.from("events").select(EVENT_COLUMNS).eq("type", "harvest").order("event_date", { ascending: false }).order("created_at", { ascending: false });
+      const { data, error } = await fetchAllRows(() => supabase.from("events").select(EVENT_COLUMNS).eq("type", "harvest").order("event_date", { ascending: false }).order("created_at", { ascending: false }).order("id"));
       if (error) throw unavailable();
       return { events: await hydrate(data) };
     },
@@ -144,7 +149,9 @@ export function createSupabaseHarvestService({ memberService, serviceRoleKey, su
     async update(actor, eventId, input) {
       if (actor.role !== "admin") throw forbidden();
       const event = await eventRow(eventId);
-      if (input.eventDate !== undefined) {
+      // Re-sending the stored date is not a date change, so it never trips the date lock.
+      const newEventDate = input.eventDate !== undefined && input.eventDate !== event.event_date ? input.eventDate : undefined;
+      if (newEventDate !== undefined) {
         if (event.status === "closed") throw new HarvestServiceError(422, "EVENT_ACTIVITY_LOCKS_DATE", "A closed Harvest Event date cannot be changed.");
         const { count, error } = await supabase.from("harvest_participations").select("visitor_id", { count: "exact", head: true }).eq("event_id", eventId);
         if (error) throw unavailable();
@@ -152,9 +159,10 @@ export function createSupabaseHarvestService({ memberService, serviceRoleKey, su
       }
       const update: TablesUpdate<"events"> = {};
       if (input.description !== undefined) update.description = input.description;
-      if (input.eventDate !== undefined) update.event_date = input.eventDate;
+      if (newEventDate !== undefined) update.event_date = newEventDate;
       if (input.location !== undefined) update.location = input.location;
       if (input.title !== undefined) update.title = input.title;
+      if (Object.keys(update).length === 0) return hydrateOne(event);
       const { data, error } = await supabase.from("events").update(update).eq("id", eventId).select(EVENT_COLUMNS).single();
       if (error) throw unavailable();
       return hydrateOne(data);
@@ -170,21 +178,23 @@ export function createSupabaseHarvestService({ memberService, serviceRoleKey, su
     },
     async listParticipations(_actor, eventId) {
       await eventRow(eventId);
-      const { data: rows, error } = await supabase.from("harvest_participations").select("event_id, visitor_id, registered_by_profile_id, sunday_interest, interest_recorded_by_profile_id, interest_recorded_at, created_at").eq("event_id", eventId).order("created_at");
+      const { data: rows, error } = await fetchAllRows(() => supabase.from("harvest_participations").select("event_id, visitor_id, registered_by_profile_id, sunday_interest, interest_recorded_by_profile_id, interest_recorded_at, created_at").eq("event_id", eventId).order("created_at").order("visitor_id"));
       if (error) throw unavailable();
       if (rows.length === 0) return { participations: [] };
       const visitorIds = rows.map((row) => row.visitor_id);
       const profileIds = [...new Set(rows.flatMap((row) => [row.registered_by_profile_id, row.interest_recorded_by_profile_id].filter((id): id is string => Boolean(id))))];
-      const [visitors, profiles, followUps] = await Promise.all([
-        supabase.from("visitors").select("id, first_name, last_name, phone, email, status").in("id", visitorIds),
-        supabase.from("profiles").select("id, name").in("id", profileIds),
-        supabase.from("follow_ups").select("id, visitor_id, status, created_at").eq("reason", "harvest_sunday_interest").in("visitor_id", visitorIds).order("created_at", { ascending: false }),
+      // A Visitor can have many follow-ups, so each ID chunk is read in batches, newest first.
+      const [visitors, profiles, followUpChunks] = await Promise.all([
+        fetchRowsByIds(visitorIds, (idChunk) => supabase.from("visitors").select("id, first_name, last_name, phone, email, status").in("id", idChunk)),
+        fetchRowsByIds(profileIds, (idChunk) => supabase.from("profiles").select("id, name").in("id", idChunk)),
+        Promise.all(chunk([...new Set(visitorIds)]).map((ids) => fetchAllRows(() => supabase.from("follow_ups").select("id, visitor_id, status, created_at").eq("reason", "harvest_sunday_interest").in("visitor_id", ids).order("created_at", { ascending: false }).order("id")))),
       ]);
-      if (visitors.error || profiles.error || followUps.error) throw unavailable();
+      if (visitors.error || profiles.error || followUpChunks.some((result) => result.error)) throw unavailable();
       const visitorsById = new Map(visitors.data.map((visitor) => [visitor.id, visitor]));
       const profileNames = new Map(profiles.data.map((profile) => [profile.id, profile.name]));
-      const followUpsByVisitor = new Map<string, (typeof followUps.data)[number]>();
-      for (const followUp of followUps.data) if (followUp.visitor_id && !followUpsByVisitor.has(followUp.visitor_id)) followUpsByVisitor.set(followUp.visitor_id, followUp);
+      const followUps = followUpChunks.flatMap((result) => result.data ?? []);
+      const followUpsByVisitor = new Map<string, (typeof followUps)[number]>();
+      for (const followUp of followUps) if (followUp.visitor_id && !followUpsByVisitor.has(followUp.visitor_id)) followUpsByVisitor.set(followUp.visitor_id, followUp);
       const participations = rows.map<HarvestParticipation>((row) => {
         const visitor = visitorsById.get(row.visitor_id);
         if (!visitor) throw unavailable();

@@ -7,11 +7,13 @@ import { FormField, TextArea, TextInput } from '../ui/FormControls'
 import { Modal } from '../ui/Modal'
 
 export type HarvestFormContext = { mode: 'create' } | { event: HarvestEvent; mode: 'edit' }
+/** Create always carries `eventDate`; an edit omits it when the date is unchanged, so a locked date is never re-submitted. */
+export type HarvestEventSaveInput = Omit<HarvestEventInput, 'eventDate'> & { eventDate?: string }
 
 export function HarvestEventFormModal({ context, onClose, onSave, onSaved }: {
   context: HarvestFormContext
   onClose(): void
-  onSave(input: HarvestEventInput): Promise<HarvestEvent>
+  onSave(input: HarvestEventSaveInput): Promise<HarvestEvent>
   onSaved(event: HarvestEvent): void
 }) {
   const event = context.mode === 'edit' ? context.event : null
@@ -26,7 +28,8 @@ export function HarvestEventFormModal({ context, onClose, onSave, onSaved }: {
     formEvent.preventDefault()
     if (!title.trim() || !eventDate) { setError('Title and date are required.'); return }
     setSaving(true); setError(null)
-    try { onSaved(await onSave({ description: description.trim() || null, eventDate, location: location.trim() || null, title: title.trim() })) }
+    const fields = { description: description.trim() || null, location: location.trim() || null, title: title.trim() }
+    try { onSaved(await onSave(event && eventDate === event.eventDate ? fields : { ...fields, eventDate })) }
     catch (caught) { setError(caught instanceof ApiError ? caught.message : 'The Harvest Event could not be saved.') }
     finally { setSaving(false) }
   }

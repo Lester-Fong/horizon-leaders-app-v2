@@ -317,5 +317,57 @@ describeWithLocalSupabase("Ministry API with local Supabase", () => {
     expect(
       (await adminClient.from("members").select("id").eq("id", otherGroupId).single()).data?.id,
     ).toBe(otherGroupId);
+
+    const leaderReactivate = await asActor(
+      "leader-a-token",
+      "patch",
+      `/api/ministries/${activeMinistryId}/reactivate`,
+    );
+    expect(leaderReactivate.status).toBe(403);
+    const reactivated = await asActor(
+      "admin-token",
+      "patch",
+      `/api/ministries/${activeMinistryId}/reactivate`,
+    );
+    expect(reactivated.status).toBe(200);
+    expect(reactivated.body.data).toEqual(
+      expect.objectContaining({ id: activeMinistryId, isActive: true }),
+    );
+    const alreadyActive = await asActor(
+      "admin-token",
+      "patch",
+      `/api/ministries/${activeMinistryId}/reactivate`,
+    );
+    expect(alreadyActive.status).toBe(200);
+    expect(alreadyActive.body.data.isActive).toBe(true);
+
+    const assignmentsAfterReactivation = await asActor(
+      "admin-token",
+      "get",
+      `/api/ministries/${activeMinistryId}/members`,
+    );
+    expect(
+      assignmentsAfterReactivation.body.data.map(({ id }: { id: string }) => id).sort(),
+    ).toEqual([ownArchivedId, ownVisibleId].sort());
+    const reassigned = await asActor(
+      "admin-token",
+      "post",
+      `/api/ministries/${activeMinistryId}/members`,
+    ).send({ memberId: otherGroupId });
+    expect(reassigned.status).toBe(201);
+    const leaderDetailAfterReactivation = await asActor(
+      "leader-a-token",
+      "get",
+      `/api/ministries/${activeMinistryId}`,
+    );
+    expect(leaderDetailAfterReactivation.status).toBe(200);
+    const leaderListAfterReactivation = await asActor(
+      "leader-a-token",
+      "get",
+      "/api/ministries",
+    );
+    expect(ownFixtures(leaderListAfterReactivation.body)).toEqual([
+      expect.objectContaining({ id: activeMinistryId, isActive: true }),
+    ]);
   });
 });

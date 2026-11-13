@@ -1,5 +1,8 @@
 import type { AppRole, HorizonActor } from "../auth/types.js";
 
+/** Auth email domain for deleted users; `.invalid` is reserved and never routes mail. */
+export const DELETED_EMAIL_DOMAIN = "deleted.invalid";
+
 export interface UserAssignedLifeGroup {
   id: string;
   isActive: boolean;
@@ -9,6 +12,9 @@ export interface UserAssignedLifeGroup {
 export interface ManagedUser {
   assignedLifeGroup: UserAssignedLifeGroup | null;
   createdAt: string;
+  /** When an Admin deleted this user; their sign-in is gone but the record is kept. */
+  deletedAt: string | null;
+  /** For a deleted user, the email they signed in with before deletion. */
   email: string | null;
   id: string;
   isActive: boolean;
@@ -18,7 +24,11 @@ export interface ManagedUser {
   updatedAt: string;
 }
 
-export type UserListStatus = "active" | "all" | "inactive";
+/**
+ * active: active users; inactive: deactivated but not deleted;
+ * all: every user that is not deleted; deleted: deleted users only.
+ */
+export type UserListStatus = "active" | "all" | "deleted" | "inactive";
 
 export interface ListUsersOptions {
   search?: string | undefined;
@@ -63,7 +73,8 @@ export type UserErrorCode =
   | "CURRENT_PASSWORD_INCORRECT"
   | "PASSWORD_UNCHANGED"
   | "EMAIL_ALREADY_REGISTERED"
-  | "USER_HAS_HISTORY"
+  | "LAST_ACTIVE_ADMIN"
+  | "USER_DELETED"
   | "USER_NOT_FOUND"
   | "USER_SERVICE_UNAVAILABLE"
   | "WEAK_PASSWORD";

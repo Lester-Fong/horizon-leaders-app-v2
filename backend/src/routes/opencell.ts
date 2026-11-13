@@ -8,6 +8,7 @@ import {
   hasOwn,
   hasUnknownFields,
   isRecord,
+  readCalendarDate,
   readRequiredText,
   readUuid,
 } from "../http/validation.js";
@@ -30,7 +31,7 @@ const INVALID_IDS = "IDs must be valid UUIDs.";
 const INVALID_PROGRAMME_FIELDS = "Provide only name and description.";
 const INVALID_SESSION_FIELDS = "Provide the approved Session fields.";
 const PROGRAMME_NAME_REQUIRED = "Programme name is required.";
-const SESSION_DATE_REQUIRED = "Session date is required.";
+const SESSION_DATE_REQUIRED = "Session date must be a valid YYYY-MM-DD date.";
 
 const handle = createRequestHandler(OpenCellServiceError, {
   code: "OPENCELL_SERVICE_UNAVAILABLE",
@@ -73,7 +74,7 @@ function readSessionUpdate(
 ): ParsedInput<UpdateOpenCellSessionInput> {
   const input: UpdateOpenCellSessionInput = {};
   if (hasOwn(body, "sessionDate")) {
-    const sessionDate = readRequiredText(body.sessionDate);
+    const sessionDate = readCalendarDate(body.sessionDate);
     if (!sessionDate) return { message: SESSION_DATE_REQUIRED };
     input.sessionDate = sessionDate;
   }
@@ -192,7 +193,7 @@ export function createOpenCellRouter(
       sendInvalid(response, INVALID_SESSION_FIELDS);
       return;
     }
-    const sessionDate = readRequiredText(request.body.sessionDate);
+    const sessionDate = readCalendarDate(request.body.sessionDate);
     const title = readNullableText(request.body.title);
     const location = readNullableText(request.body.location);
     const notes = readNullableText(request.body.notes);
@@ -292,9 +293,12 @@ export function createOpenCellRouter(
       const enrolledOn =
         request.body.enrolledOn === undefined
           ? churchDate()
-          : readRequiredText(request.body.enrolledOn);
+          : readCalendarDate(request.body.enrolledOn);
       if (!visitorId || !enrolledOn) {
-        sendInvalid(response, "Visitor ID and enrollment date are required.");
+        sendInvalid(
+          response,
+          "Visitor ID and a valid YYYY-MM-DD enrollment date are required.",
+        );
         return;
       }
       await handle(

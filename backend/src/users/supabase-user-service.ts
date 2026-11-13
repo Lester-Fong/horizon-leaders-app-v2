@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import { createClient, type User } from "@supabase/supabase-js";
 
 import type { HorizonActor } from "../auth/types.js";
@@ -5,6 +7,7 @@ import { USER_ACTIVITY_LIMIT } from "../config/constants.js";
 import { fetchAllRows } from "../db/range-queries.js";
 import type { Database, Json, Tables, TablesUpdate } from "../types/database.types.js";
 import {
+  DELETED_EMAIL_DOMAIN,
   UserServiceError,
   type ManagedUser,
   type UserActivityAction,
@@ -20,7 +23,7 @@ interface SupabaseUserServiceConfig {
 
 type ProfileRow = Tables<"profiles">;
 
-const PROFILE_COLUMNS = "id, name, role, is_active, created_at, updated_at";
+const PROFILE_COLUMNS = "id, name, role, is_active, deleted_at, created_at, updated_at";
 const AUDIT_COLUMNS =
   "id, action, actor_profile_id, actor_name, target_user_id, target_name, details, created_at";
 const LIST_PAGE_SIZE = 1000;
@@ -37,9 +40,17 @@ const USER_ACTIVITY_ACTIONS: ReadonlySet<string> = new Set<UserActivityAction>([
   "user_reactivated",
   "user_updated",
 ]);
+/** Roughly 100 years: Supabase Auth has no permanent ban, so a deleted sign-in is banned for good. */
+const DELETED_USER_BAN_DURATION = "876000h";
+const ACTIVE_ADMIN_CONSTRAINT = "profiles_active_admin_required";
 const CLIENT_OPTIONS = {
   auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
 };
+
+interface PostgrestErrorLike {
+  code?: string | undefined;
+  message?: string | undefined;
+}
 
 interface AuthErrorLike {
   code?: string | undefined;
@@ -60,6 +71,32 @@ function userNotFound() {
 
 function ownAccount(message: string) {
   return new UserServiceError(409, "CANNOT_MODIFY_OWN_ACCOUNT", message);
+}
+
+function userDeleted() {
+  return new UserServiceError(
+    409,
+    "USER_DELETED",
+    "This user was deleted and can no longer be changed.",
+  );
+}
+
+function lastActiveAdmin() {
+  return new UserServiceError(409, "LAST_ACTIVE_ADMIN", "At least one active Admin is required.");
+}
+
+/** The database rejects any Profile update that would leave no active Admin. */
+function isLastActiveAdminError(error: PostgrestErrorLike) {
+  return error.code === "23514" && (error.message?.includes(ACTIVE_ADMIN_CONSTRAINT) ?? false);
+}
+
+function deletedEmailFor(userId: string) {
+  return `deleted+${userId}@${DELETED_EMAIL_DOMAIN}`;
+}
+
+/** A random 64-character password nobody knows, so the deleted sign-in cannot be used. */
+function unusablePassword() {
+  return randomBytes(48).toString("base64url");
 }
 
 function emailAlreadyRegistered() {
@@ -91,15 +128,22 @@ function mapAuthError(error: AuthErrorLike) {
   return serviceUnavailable();
 }
 
+function readDeletedEmail(authUser: Pick<User, "app_metadata"> | undefined) {
+  const deletedEmail: unknown = authUser?.app_metadata?.deleted_email;
+  return typeof deletedEmail === "string" ? deletedEmail : null;
+}
+
 function mapUser(
   profile: ProfileRow,
-  authUser: Pick<User, "email" | "last_sign_in_at"> | undefined,
+  authUser: Pick<User, "app_metadata" | "email" | "last_sign_in_at"> | undefined,
   assignedLifeGroup: UserAssignedLifeGroup | null,
 ): ManagedUser {
   return {
     assignedLifeGroup,
     createdAt: profile.created_at,
-    email: authUser?.email ?? null,
+    deletedAt: profile.deleted_at,
+    // A deleted user's Auth email is a placeholder; show the email they used instead.
+    email: profile.deleted_at ? readDeletedEmail(authUser) : (authUser?.email ?? null),
     id: profile.id,
     isActive: profile.is_active,
     lastSignInAt: authUser?.last_sign_in_at ?? null,
@@ -175,6 +219,13 @@ export function createSupabaseUserService({
     return data;
   }
 
+  /** Loads a Profile that may still be changed; a deleted user is read-only. */
+  async function getMutableProfile(userId: string) {
+    const profile = await getProfile(userId);
+    if (profile.deleted_at) throw userDeleted();
+    return profile;
+  }
+
   async function getAuthUser(userId: string) {
     const { data, error } = await supabase.auth.admin.getUserById(userId);
     if (error) throw mapAuthError(error);
@@ -205,25 +256,22 @@ export function createSupabaseUserService({
     return mapUser(profile, authUser, assignedLifeGroup);
   }
 
-  /** Updates one Profile; zero matched rows is a failure, never a silent success. */
+  /**
+   * Updates one Profile that has not been deleted. Zero matched rows means it was
+   * deleted meanwhile, which is never reported as a silent success.
+   */
   async function updateProfile(userId: string, update: TablesUpdate<"profiles">) {
     const { data, error } = await supabase
       .from("profiles")
       .update(update)
       .eq("id", userId)
+      .is("deleted_at", null)
       .select("id");
 
-    if (error || data.length === 0) throw serviceUnavailable();
-  }
-
-  async function hasReferences(userId: string) {
-    const { data, error } = await supabase.rpc("profile_has_references", {
-      p_profile_id: userId,
-    });
-
-    if (error) throw serviceUnavailable();
-
-    return data;
+    if (error) {
+      throw isLastActiveAdminError(error) ? lastActiveAdmin() : serviceUnavailable();
+    }
+    if (data.length === 0) throw userDeleted();
   }
 
   /**
@@ -278,7 +326,9 @@ export function createSupabaseUserService({
           .select(PROFILE_COLUMNS)
           .order("name")
           .order("id");
-        return status === "all" ? query : query.eq("is_active", status === "active");
+        if (status === "deleted") return query.not("deleted_at", "is", null);
+        const notDeleted = query.is("deleted_at", null);
+        return status === "all" ? notDeleted : notDeleted.eq("is_active", status === "active");
       };
 
       const [authUsers, profilesResult, groupsResult] = await Promise.all([
@@ -367,7 +417,10 @@ export function createSupabaseUserService({
         await updateProfile(userId, { name: input.name, role: input.role });
       } catch (profileError) {
         await supabase.auth.admin.deleteUser(userId).catch(() => undefined);
-        throw profileError;
+        // A brand-new Profile cannot be deleted; a missing row means the Auth trigger failed.
+        const isMissingProfile =
+          profileError instanceof UserServiceError && profileError.code === "USER_DELETED";
+        throw isMissingProfile ? serviceUnavailable() : profileError;
       }
 
       await recordActivity(actor, "user_created", { id: userId, name: input.name }, {
@@ -379,7 +432,7 @@ export function createSupabaseUserService({
     },
 
     async update(actor, userId, input) {
-      const previous = await getProfile(userId);
+      const previous = await getMutableProfile(userId);
 
       if (input.role !== undefined && userId === actor.id && input.role !== actor.role) {
         throw ownAccount("You cannot change the role of your own account.");
@@ -462,7 +515,7 @@ export function createSupabaseUserService({
     },
 
     async setActive(actor, userId, isActive) {
-      const profile = await getProfile(userId);
+      const profile = await getMutableProfile(userId);
 
       if (userId === actor.id && !isActive) {
         throw ownAccount("You cannot deactivate your own account.");
@@ -490,7 +543,7 @@ export function createSupabaseUserService({
         throw ownAccount("Use My profile to change your own password.");
       }
 
-      const profile = await getProfile(userId);
+      const profile = await getMutableProfile(userId);
 
       const { error } = await supabase.auth.admin.updateUserById(userId, {
         app_metadata: { must_change_password: true },
@@ -551,36 +604,57 @@ export function createSupabaseUserService({
       return { id: actor.id };
     },
 
+    /**
+     * Soft delete: the sign-in is removed for good but the Profile and its history
+     * stay, so past records keep the user's name. The Profile is marked first (the
+     * last-active-Admin rule can reject it, and it is easy to undo), then the Auth
+     * user gets a placeholder email, an unknown password, and a permanent ban, which
+     * also frees the original email for a new account.
+     */
     async delete(actor, userId) {
-      const profile = await getProfile(userId);
+      const profile = await getMutableProfile(userId);
 
       if (userId === actor.id) {
         throw ownAccount("You cannot delete your own account.");
       }
 
-      const historyError = new UserServiceError(
-        409,
-        "USER_HAS_HISTORY",
-        "This user has Horizon history and cannot be deleted. Deactivate the account instead.",
-      );
-
-      if (await hasReferences(userId)) throw historyError;
-
       const authUser = await getAuthUser(userId);
+      const originalEmail = authUser.email ?? null;
 
-      // Deleting the Auth user cascades to the Profile.
-      const { error } = await supabase.auth.admin.deleteUser(userId);
+      await updateProfile(userId, { deleted_at: new Date().toISOString(), is_active: false });
+
+      const { error } = await supabase.auth.admin.updateUserById(userId, {
+        app_metadata: {
+          ...authUser.app_metadata,
+          deleted: true,
+          deleted_email: originalEmail,
+          must_change_password: false,
+        },
+        ban_duration: DELETED_USER_BAN_DURATION,
+        email: deletedEmailFor(userId),
+        email_confirm: true,
+        password: unusablePassword(),
+      });
 
       if (error) {
-        // A reference may have been created after the check; RESTRICT keys then block the cascade.
-        if (await hasReferences(userId)) throw historyError;
+        // Undo the Profile change so the user is not left half-deleted.
+        const { error: revertError } = await supabase
+          .from("profiles")
+          .update({ deleted_at: null, is_active: profile.is_active })
+          .eq("id", userId);
+        if (revertError) {
+          console.error(`[users] Could not undo the deletion of ${userId}.`);
+        }
         throw mapAuthError(error);
       }
 
       await recordActivity(actor, "user_deleted", { id: userId, name: profile.name }, {
-        email: authUser.email ?? null,
+        email: originalEmail,
+        mode: "soft",
         role: profile.role,
+        wasActive: profile.is_active,
       });
+      await revokeSessions(userId);
 
       return { id: userId };
     },

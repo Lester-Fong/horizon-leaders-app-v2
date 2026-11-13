@@ -198,6 +198,7 @@ const unavailableMinistryService: MinistryService = {
   getById: async () => unavailableMinistry(),
   list: async () => unavailableMinistry(),
   listMembers: async () => unavailableMinistry(),
+  reactivate: async () => unavailableMinistry(),
   removeMember: async () => unavailableMinistry(),
   update: async () => unavailableMinistry(),
 };

@@ -132,7 +132,7 @@ export class IsolatedFixtures {
     return { ...user, id }
   }
 
-  /** Gives a fixture leader Horizon history so permanent delete must be refused. */
+  /** Gives a fixture leader Horizon history: a Life Group they lead. */
   async createLifeGroupFor(leaderId: string, label = 'Life Group') {
     const name = this.nameFor(label)
     const created = await this.request('/rest/v1/life_groups', {

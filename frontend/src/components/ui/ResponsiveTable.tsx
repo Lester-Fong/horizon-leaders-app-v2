@@ -23,7 +23,9 @@ export function ResponsiveTable({
         aria-label={caption}
         tabIndex={0}
         className={cn(
-          'w-full min-w-0 max-w-full overflow-x-auto border-y border-line bg-canvas',
+          // `relative` keeps visually hidden (absolutely positioned) cell content inside
+          // this scroll box, so a wide table never widens the whole page.
+          'relative w-full min-w-0 max-w-full overflow-x-auto border-y border-line bg-canvas',
           className,
         )}
       >

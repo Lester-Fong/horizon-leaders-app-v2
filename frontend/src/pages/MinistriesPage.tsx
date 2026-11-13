@@ -1,10 +1,10 @@
 import {
   Archive,
+  ArchiveRestore,
   Eye,
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   UserMinus,
   UserPlus,
   UsersRound,
@@ -13,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -29,7 +30,10 @@ import {
   FeedbackBanner,
   LoadingState,
 } from '../components/ui/Feedback'
+import { FilteredEmptyState } from '../components/ui/FilteredEmptyState'
 import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { SearchControl } from '../components/ui/SearchControl'
+import { cn } from '../lib/cn'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -44,6 +48,7 @@ import {
   getMinistries,
   getMinistry,
   getMinistryMembers,
+  reactivateMinistry,
   removeMemberFromMinistry,
   updateMinistry,
   type MemberSummary,
@@ -52,7 +57,17 @@ import {
   type MinistryListStatus,
   type MinistryMember,
 } from '../lib/api'
+import {
+  readEnum,
+  readSearch,
+  useListSearchParams,
+  useSearchInput,
+} from '../lib/listSearchParams'
 import { getAccessToken } from '../lib/session'
+import { usePageTitle } from '../lib/usePageTitle'
+
+const MINISTRY_STATUSES: readonly MinistryListStatus[] = ['active', 'archived', 'all']
+const MINISTRY_LIST_DEFAULTS = { search: '', status: 'active' }
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -73,15 +88,25 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 }
 
 export function MinistriesPage() {
+  usePageTitle('Ministries')
   const { actor } = useAuth()
   const isAdmin = actor?.role === 'admin'
+  const {
+    reset: resetListParams,
+    searchParams,
+    update: updateListParams,
+  } = useListSearchParams(MINISTRY_LIST_DEFAULTS)
+  const search = readSearch(searchParams)
+  // Leaders only see active Ministries; a status in the URL is ignored for them.
+  const statusFilter = isAdmin
+    ? readEnum(searchParams, 'status', MINISTRY_STATUSES, 'active')
+    : 'active'
+  const [searchInput, setSearchInput] = useSearchInput(search)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [ministries, setMinistries] = useState<Ministry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<MinistryListStatus>('active')
   const [formContext, setFormContext] = useState<MinistryFormContext | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [detailMinistry, setDetailMinistry] = useState<Ministry | null>(null)
@@ -90,6 +115,7 @@ export function MinistriesPage() {
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState<Ministry | null>(null)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null)
   const [assignmentTarget, setAssignmentTarget] = useState<Ministry | null>(null)
   const [assignedMembers, setAssignedMembers] = useState<MinistryMember[]>([])
   const [candidateMembers, setCandidateMembers] = useState<MemberSummary[]>([])
@@ -124,12 +150,24 @@ export function MinistriesPage() {
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSearch(searchInput.trim())
+    updateListParams({ search: searchInput.trim() })
   }
 
   function clearSearch() {
     setSearchInput('')
-    setSearch('')
+    updateListParams({ search: '' })
+  }
+
+  /** Empty-state actions: clear, then return focus to the search field. */
+  function clearSearchAndFocus() {
+    clearSearch()
+    searchInputRef.current?.focus()
+  }
+
+  function clearFiltersAndFocus() {
+    setSearchInput('')
+    resetListParams()
+    searchInputRef.current?.focus()
   }
 
   async function openDetails(ministry: Ministry) {
@@ -198,6 +236,24 @@ export function MinistriesPage() {
       setLoadError(getErrorMessage(error))
     } finally {
       setIsArchiving(false)
+    }
+  }
+
+  async function handleReactivate(target: Ministry) {
+    setReactivatingId(target.id)
+    setLoadError(null)
+    setNotice(null)
+    try {
+      const token = await getAccessToken()
+      const ministry = await reactivateMinistry(token, target.id)
+      setNotice(
+        `${ministry.name} was reactivated. Its existing Member assignments are unchanged.`,
+      )
+      await loadDirectory()
+    } catch (error) {
+      setLoadError(getErrorMessage(error))
+    } finally {
+      setReactivatingId(null)
     }
   }
 
@@ -310,18 +366,25 @@ export function MinistriesPage() {
           onSelect: () => openEdit(ministry),
         },
       )
-      if (ministry.isActive) {
-        actions.push({
-          icon: Archive,
-          label: 'Archive Ministry',
-          onSelect: () => setArchiveTarget(ministry),
-        })
-      }
+      actions.push(
+        ministry.isActive
+          ? {
+              icon: Archive,
+              label: 'Archive Ministry',
+              onSelect: () => setArchiveTarget(ministry),
+            }
+          : {
+              icon: ArchiveRestore,
+              label: 'Reactivate Ministry',
+              onSelect: () => void handleReactivate(ministry),
+            },
+      )
     }
     return actions
   }
 
-  const hasFilters = Boolean(search || (isAdmin && statusFilter !== 'active'))
+  // Filters other than the text search; always false for Leaders.
+  const hasFilters = statusFilter !== 'active'
 
   return (
     <div className="space-y-8">
@@ -366,34 +429,36 @@ export function MinistriesPage() {
                 : 'Scope: Active Ministries / Read only'}
             </p>
           </div>
-          {!isLoading && (
-            <p className="font-mono text-xs text-muted" aria-live="polite">
-              {ministries.length} {ministries.length === 1 ? 'Ministry' : 'Ministries'}
-            </p>
-          )}
+          <p className="font-mono text-xs text-muted" role="status" aria-live="polite">
+            {isLoading
+              ? 'Loading…'
+              : `${ministries.length} ${ministries.length === 1 ? 'Ministry' : 'Ministries'}`}
+          </p>
         </div>
 
         <form
-          className="grid gap-4 md:grid-cols-[minmax(14rem,1fr)_auto] lg:grid-cols-[minmax(16rem,1fr)_12rem_auto]"
+          className={cn(
+            'grid items-end gap-4',
+            isAdmin ? 'lg:grid-cols-[minmax(0,40rem)_12rem]' : 'max-w-2xl',
+          )}
           onSubmit={handleSearch}
         >
-          <FormField id="ministry-search" label="Search" description="Ministry name">
-            <TextInput
-              id="ministry-search"
-              type="search"
-              value={searchInput}
-              placeholder="Search Ministries"
-              onChange={(event) => setSearchInput(event.target.value)}
-            />
-          </FormField>
+          <SearchControl
+            id="ministry-search"
+            inputRef={searchInputRef}
+            description="Ministry name"
+            placeholder="Search Ministries"
+            value={searchInput}
+            isApplied={Boolean(search)}
+            onChange={setSearchInput}
+            onClear={clearSearch}
+          />
           {isAdmin && (
             <FormField id="ministry-status-filter" label="Status">
               <Select
                 id="ministry-status-filter"
                 value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as MinistryListStatus)
-                }
+                onChange={(event) => updateListParams({ status: event.target.value })}
               >
                 <option value="active">Active</option>
                 <option value="archived">Archived</option>
@@ -401,17 +466,6 @@ export function MinistriesPage() {
               </Select>
             </FormField>
           )}
-          <div className="flex items-end gap-2">
-            <Button type="submit" variant="secondary">
-              <Search aria-hidden="true" className="size-4" />
-              Search
-            </Button>
-            {search && (
-              <Button type="button" variant="ghost" onClick={clearSearch}>
-                Clear
-              </Button>
-            )}
-          </div>
         </form>
       </section>
 
@@ -423,25 +477,31 @@ export function MinistriesPage() {
           description={loadError}
           action={<Button onClick={() => void loadDirectory()}>Try again</Button>}
         />
+      ) : ministries.length === 0 && (search || hasFilters) ? (
+        <FilteredEmptyState
+          icon={UsersRound}
+          plural="Ministries"
+          search={search}
+          searchFields="another Ministry name"
+          hasFilters={hasFilters}
+          onClearFilters={clearFiltersAndFocus}
+          onClearSearch={clearSearchAndFocus}
+        />
       ) : ministries.length === 0 ? (
         <EmptyState
           icon={UsersRound}
-          title={hasFilters ? 'No Ministries match' : 'No active Ministries yet'}
+          title="No active Ministries yet"
           description={
-            hasFilters
-              ? 'Adjust the current search or status and try again.'
-              : isAdmin
-                ? 'Create the first Ministry to begin organizing Member assignments.'
-                : 'No active Ministries are available to view.'
+            isAdmin
+              ? 'Create the first Ministry to begin organizing Member assignments.'
+              : 'No active Ministries are available to view.'
           }
           action={
-            isAdmin && !hasFilters ? (
+            isAdmin ? (
               <Button onClick={() => setFormContext({ mode: 'create' })}>
                 <Plus aria-hidden="true" className="size-4" />
                 New Ministry
               </Button>
-            ) : hasFilters ? (
-              <Button variant="secondary" onClick={clearSearch}>Clear search</Button>
             ) : undefined
           }
         />
@@ -482,6 +542,7 @@ export function MinistriesPage() {
                   <RowActionsMenu
                     label={`Actions for ${ministry.name}`}
                     actions={rowActions(ministry)}
+                    disabled={reactivatingId === ministry.id}
                   />
                 </td>
               </tr>
@@ -678,7 +739,7 @@ export function MinistriesPage() {
         description="The Ministry will leave the active directory. Its existing Member assignments will remain stored."
       >
         <p className="text-sm leading-6 text-muted">
-          Archive <span className="font-semibold text-ink">{archiveTarget?.name}</span>? New Member assignments will no longer be allowed. This phase does not include reactivation.
+          Archive <span className="font-semibold text-ink">{archiveTarget?.name}</span>? New Member assignments will no longer be allowed until an Admin reactivates it.
         </p>
         <div className="mt-6 flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={() => setArchiveTarget(null)} disabled={isArchiving}>Cancel</Button>

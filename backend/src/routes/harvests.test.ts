@@ -71,4 +71,24 @@ describe("Harvest Event API", () => {
   it("exposes no participant deletion or Event reopen route", async () => {
     const { app } = setup(); expect((await bearer(request(app).delete(`/api/events/harvest/${eventId}/participations/${visitorId}`))).status).toBe(404); expect((await bearer(request(app).post(`/api/events/harvest/${eventId}/reopen`))).status).toBe(404);
   });
+
+  it("answers 400 instead of hanging when an edit, new Visitor, or interest request has no body", async () => {
+    const { app, service } = setup();
+    const patch = await bearer(request(app).patch(`/api/events/harvest/${eventId}`));
+    const newVisitor = await bearer(request(app).post(`/api/events/harvest/${eventId}/participations/new`), "leader");
+    const interest = await bearer(request(app).patch(`/api/events/harvest/${eventId}/participations/${visitorId}/interest`), "leader");
+    expect([patch.status, newVisitor.status, interest.status]).toEqual([400, 400, 400]);
+    expect(interest.body.error.code).toBe("INVALID_REQUEST");
+    expect(service.update).not.toHaveBeenCalled();
+    expect(service.registerNewVisitor).not.toHaveBeenCalled();
+    expect(service.recordInterest).not.toHaveBeenCalled();
+  });
+
+  it("sends one 400 when both interest path IDs are invalid", async () => {
+    const { app, service } = setup();
+    const response = await bearer(request(app).patch("/api/events/harvest/not-a-uuid/participations/also-bad/interest"), "leader").send({ interested: true });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toEqual({ code: "INVALID_REQUEST", message: "Event ID must be a valid UUID." });
+    expect(service.recordInterest).not.toHaveBeenCalled();
+  });
 });

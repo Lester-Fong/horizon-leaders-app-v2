@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
-import { HarvestEventFormModal, type HarvestFormContext } from '../components/events/HarvestEventFormModal'
-import { SundayServiceFormModal, type ServiceFormContext } from '../components/events/SundayServiceFormModal'
+import { HarvestEventFormModal, type HarvestEventSaveInput, type HarvestFormContext } from '../components/events/HarvestEventFormModal'
+import { SundayServiceFormModal, type ServiceFormContext, type SundayServiceSaveInput } from '../components/events/SundayServiceFormModal'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
 import { Modal } from '../components/ui/Modal'
@@ -12,9 +12,10 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
 import { RowActionsMenu, type RowAction } from '../components/ui/RowActionsMenu'
 import { StatusBadge } from '../components/ui/StatusBadge'
-import { ApiError, closeHarvestEvent, closeSundayService, createHarvestEvent, createSundayService, getHarvestEvents, getSundayServices, updateHarvestEvent, updateSundayService, type HarvestEvent, type HarvestEventInput, type SundayService, type SundayServiceInput } from '../lib/api'
+import { ApiError, closeHarvestEvent, closeSundayService, createHarvestEvent, createSundayService, getHarvestEvents, getSundayServices, updateHarvestEvent, updateSundayService, type HarvestEvent, type SundayService } from '../lib/api'
 import { formatCalendarDate } from '../lib/dates'
 import { getAccessToken as token } from '../lib/session'
+import { usePageTitle } from '../lib/usePageTitle'
 
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Event data is unavailable right now.' }
 const formatDate = formatCalendarDate
@@ -23,6 +24,7 @@ type Directory = 'service' | 'harvest'
 type ClosingEvent = { event: HarvestEvent; type: 'harvest' } | { event: SundayService; type: 'service' }
 
 export function EventsPage() {
+  usePageTitle('Events')
   const { actor } = useAuth(); const navigate = useNavigate(); const isAdmin = actor?.role === 'admin'
   const [directory, setDirectory] = useState<Directory>('service')
   const [services, setServices] = useState<SundayService[]>([]); const [harvests, setHarvests] = useState<HarvestEvent[]>([])
@@ -38,8 +40,18 @@ export function EventsPage() {
   }, [])
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer) }, [load])
 
-  async function saveService(input: SundayServiceInput) { const accessToken = await token(); return serviceForm?.mode === 'edit' ? updateSundayService(accessToken, serviceForm.event.id, input) : createSundayService(accessToken, input) }
-  async function saveHarvest(input: HarvestEventInput) { const accessToken = await token(); return harvestForm?.mode === 'edit' ? updateHarvestEvent(accessToken, harvestForm.event.id, input) : createHarvestEvent(accessToken, input) }
+  async function saveService({ eventDate, ...fields }: SundayServiceSaveInput) {
+    const accessToken = await token()
+    if (serviceForm?.mode === 'edit') return updateSundayService(accessToken, serviceForm.event.id, { ...fields, eventDate })
+    if (!eventDate) throw new Error('A Sunday Service date is required.')
+    return createSundayService(accessToken, { ...fields, eventDate })
+  }
+  async function saveHarvest({ eventDate, ...fields }: HarvestEventSaveInput) {
+    const accessToken = await token()
+    if (harvestForm?.mode === 'edit') return updateHarvestEvent(accessToken, harvestForm.event.id, { ...fields, eventDate })
+    if (!eventDate) throw new Error('A Harvest Event date is required.')
+    return createHarvestEvent(accessToken, { ...fields, eventDate })
+  }
   async function confirmClose() {
     if (!closing) return; setIsClosing(true); setError(null)
     try {

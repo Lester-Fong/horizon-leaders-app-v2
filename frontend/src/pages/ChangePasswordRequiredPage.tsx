@@ -4,9 +4,11 @@ import { useAuth } from '../auth/useAuth'
 import { ChangePasswordForm } from '../components/users/ChangePasswordForm'
 import { Button } from '../components/ui/Button'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
+import { usePageTitle } from '../lib/usePageTitle'
 
 /** Shown instead of the app while the account still uses a password an Admin set. */
 export function ChangePasswordRequiredPage() {
+  usePageTitle('Set your password')
   const { actor, logout } = useAuth()
 
   return (

@@ -43,6 +43,8 @@ export interface DashboardBreakdown {
 }
 
 export interface DashboardData {
+  /** True only for a Leader who leads no Life Group; group-scoped values are then zero/empty. */
+  isUnassignedLeader: boolean;
   memberSnapshot: { age: DashboardBreakdown[]; gender: DashboardBreakdown[] };
   metrics: DashboardMetricSet;
   needsAttention: {
@@ -64,7 +66,7 @@ export interface DashboardService {
   get(actor: HorizonActor, options: DashboardOptions): Promise<DashboardData>;
 }
 
-export type DashboardErrorCode = "DASHBOARD_SERVICE_UNAVAILABLE" | "LIFE_GROUP_SCOPE_NOT_FOUND";
+export type DashboardErrorCode = "DASHBOARD_SERVICE_UNAVAILABLE";
 
 export class DashboardServiceError extends Error {
   constructor(

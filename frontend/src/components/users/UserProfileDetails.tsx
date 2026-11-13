@@ -48,6 +48,16 @@ function lifeGroupValue(user: ManagedUser) {
   )
 }
 
+/** Active, Inactive, or Deleted (sign-in removed, history kept). */
+export function UserStatusBadge({ user }: { user: ManagedUser }) {
+  if (user.deletedAt) return <StatusBadge tone="error">Deleted</StatusBadge>
+  return (
+    <StatusBadge tone={user.isActive ? 'success' : 'neutral'}>
+      {user.isActive ? 'Active' : 'Inactive'}
+    </StatusBadge>
+  )
+}
+
 /** Read-only staff profile shared by the Admin user view and "My profile". */
 export function UserProfileDetails({ user }: UserProfileDetailsProps) {
   return (
@@ -65,10 +75,13 @@ export function UserProfileDetails({ user }: UserProfileDetailsProps) {
             <StatusBadge tone={user.role === 'admin' ? 'warning' : 'neutral'}>
               {user.role === 'admin' ? 'Admin' : 'Leader'}
             </StatusBadge>
-            <StatusBadge tone={user.isActive ? 'success' : 'neutral'}>
-              {user.isActive ? 'Active' : 'Inactive'}
-            </StatusBadge>
+            <UserStatusBadge user={user} />
           </div>
+          {user.deletedAt && (
+            <p className="mt-2 font-mono text-xs text-muted">
+              Deleted {formatDate(user.deletedAt)}
+            </p>
+          )}
         </div>
       </div>
       <dl className="border-y border-line">

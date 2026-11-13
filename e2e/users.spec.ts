@@ -124,13 +124,81 @@ test('Admin manages a staff user through create, sign-in, edit, deactivate, reac
 
   await page.getByLabel('Status').selectOption('all')
   await chooseRowAction(page, userNameEdited, 'Delete user')
-  const deleteDialog = page.getByRole('dialog', { name: 'Delete user permanently?' })
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete user?' })
   await deleteDialog.getByRole('button', { name: 'Delete user' }).click()
-  await expect(page.getByRole('status').filter({ hasText: `${userNameEdited} was permanently deleted.` })).toBeVisible()
+  await expect(
+    page.getByRole('status').filter({ hasText: `${userNameEdited} was deleted. Their history was kept.` }),
+  ).toBeVisible()
   await expect(page.getByRole('row').filter({ hasText: userNameEdited })).toHaveCount(0)
 })
 
-test('Admin cannot delete a user with history or remove their own access', async ({ page }) => {
+test('Admin deletes a user with history: sign-in removed, record kept, email reusable', async ({ page }) => {
+  const admin = await fixtures.createUser('delete-admin', 'admin')
+  const leader = await fixtures.createUser('deleted-leader', 'leader')
+  const lifeGroup = await fixtures.createLifeGroupFor(leader.id, 'Deleted Leader Group')
+
+  await login(page, admin)
+  await openUsers(page)
+  await searchUsers(page, fixtures.runId)
+
+  await chooseRowAction(page, leader.name, 'Delete user')
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete user?' })
+  await expect(deleteDialog).toContainText('This cannot be undone.')
+  await expect(deleteDialog).not.toContainText('cannot be deleted')
+  await expect(deleteDialog.getByText(`leads ${lifeGroup.name}`)).toBeVisible()
+  await deleteDialog
+    .getByLabel('New Leader')
+    .selectOption({ label: `Reassign later — leave ${lifeGroup.name} without a Leader for now` })
+  await deleteDialog.getByRole('button', { name: 'Delete user' }).click()
+  await expect(
+    page.getByRole('status').filter({ hasText: `${leader.name} was deleted. Their history was kept.` }),
+  ).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: leader.name })).toHaveCount(0)
+
+  // Deleted users are listed read-only under Deleted, with the email they used.
+  await page.getByLabel('Status').selectOption('deleted')
+  const deletedRow = rowFor(page, leader.name)
+  await expect(deletedRow).toContainText('Deleted')
+  await expect(deletedRow).toContainText(leader.email)
+  const trigger = deletedRow.getByRole('button', { name: `Actions for ${leader.name}` })
+  await trigger.click()
+  await expect(page.getByRole('menuitem')).toHaveText(['View profile'])
+  await page.getByRole('menuitem', { name: 'View profile' }).click()
+  const profileDialog = page.getByRole('dialog', { name: `${leader.name} profile` })
+  await expect(profileDialog).toContainText(/Deleted \w/)
+  await expect(profileDialog.getByRole('region', { name: 'Account activity' })).toBeVisible()
+  await expect(profileDialog.getByRole('button', { name: 'Edit user' })).toHaveCount(0)
+  await profileDialog.getByRole('button', { name: 'Close', exact: true }).click()
+
+  await page.getByRole('link', { name: 'Life Groups', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Life Groups', exact: true })).toBeVisible()
+  await expect(rowFor(page, lifeGroup.name)).toContainText(`${leader.name} (deleted)`)
+  await expect(rowFor(page, lifeGroup.name)).toContainText('Needs new Leader · Leader was deleted')
+
+  // The old sign-in no longer works.
+  await signOut(page)
+  await page.getByLabel('Email').fill(leader.email)
+  await page.getByLabel('Password').fill(leader.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.locator('#login-error')).toBeVisible()
+  await expect(page).toHaveURL(/\/login$/)
+
+  // The email can be used for a new account.
+  await login(page, admin)
+  await openUsers(page)
+  await page.getByRole('button', { name: 'New User' }).click()
+  const createDialog = page.getByRole('dialog', { name: 'Create a user' })
+  const replacementName = fixtures.nameFor('Replacement Leader')
+  await createDialog.getByLabel('Name').fill(replacementName)
+  await createDialog.getByLabel('Email').fill(leader.email)
+  await createDialog.getByLabel('Role').selectOption('leader')
+  await createDialog.getByLabel('Initial password').fill('Welcome2Horizon')
+  await createDialog.getByRole('button', { name: 'Create user' }).click()
+  await expect(page.getByRole('status').filter({ hasText: `${replacementName} was created.` })).toBeVisible()
+  await fixtures.trackUserByEmail(leader.email)
+})
+
+test('Admin cannot remove their own access and can deactivate an assigned Leader', async ({ page }) => {
   const admin = await fixtures.createUser('guard-admin', 'admin')
   const leader = await fixtures.createUser('history-leader', 'leader')
   const lifeGroup = await fixtures.createLifeGroupFor(leader.id)
@@ -146,12 +214,6 @@ test('Admin cannot delete a user with history or remove their own access', async
   await expect(profileDialog).toContainText(lifeGroup.name)
   await expect(profileDialog).toContainText('Last sign-in')
   await profileDialog.getByRole('button', { name: 'Close', exact: true }).click()
-
-  await chooseRowAction(page, leader.name, 'Delete user')
-  const deleteDialog = page.getByRole('dialog', { name: 'Delete user permanently?' })
-  await deleteDialog.getByRole('button', { name: 'Delete user' }).click()
-  await expect(deleteDialog.getByRole('alert').filter({ hasText: 'Deactivate the account instead' })).toBeVisible()
-  await deleteDialog.getByRole('button', { name: 'Cancel' }).click()
 
   await chooseRowAction(page, leader.name, 'Deactivate user')
   const deactivateDialog = page.getByRole('dialog', { name: 'Deactivate user?' })

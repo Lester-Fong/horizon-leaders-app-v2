@@ -4,17 +4,16 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   UsersRound,
 } from 'lucide-react'
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
-import { useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../auth/useAuth'
 import {
@@ -31,7 +30,10 @@ import {
   FeedbackBanner,
   LoadingState,
 } from '../components/ui/Feedback'
-import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { FilteredEmptyState } from '../components/ui/FilteredEmptyState'
+import { FormField, Select } from '../components/ui/FormControls'
+import { SearchControl } from '../components/ui/SearchControl'
+import { cn } from '../lib/cn'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import { ResponsiveTable } from '../components/ui/ResponsiveTable'
@@ -57,8 +59,36 @@ import {
   type MemberGenderFilter,
 } from '../lib/api'
 import { formatCalendarDate } from '../lib/dates'
+import {
+  readEnum,
+  readSearch,
+  readUuid,
+  useListSearchParams,
+  useSearchInput,
+} from '../lib/listSearchParams'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
+import { usePageTitle } from '../lib/usePageTitle'
+
+const MEMBER_STATUSES: readonly MemberListStatus[] = ['active', 'archived', 'all']
+const MEMBER_GENDERS: readonly (MemberGenderFilter | '')[] = ['', 'male', 'female', 'not_set']
+const MEMBER_AGES: readonly (MemberAgeFilter | '')[] = [
+  '',
+  'under_18',
+  '18_24',
+  '25_34',
+  '35_44',
+  '45_54',
+  '55_plus',
+  'not_set',
+]
+const MEMBER_LIST_DEFAULTS = {
+  age: '',
+  gender: '',
+  lifeGroupId: '',
+  search: '',
+  status: 'active',
+}
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -85,30 +115,30 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 }
 
 export function MembersPage() {
+  usePageTitle('Members')
   const { actor } = useAuth()
-  const [searchParams] = useSearchParams()
+  const {
+    reset: resetListParams,
+    searchParams,
+    update: updateListParams,
+  } = useListSearchParams(MEMBER_LIST_DEFAULTS)
   const isAdmin = actor?.role === 'admin'
+  const search = readSearch(searchParams)
+  // Leaders always see their own group's active Members; ignore Admin-only filters.
+  const lifeGroupFilter = isAdmin ? readUuid(searchParams, 'lifeGroupId') : ''
+  const statusFilter = isAdmin
+    ? readEnum(searchParams, 'status', MEMBER_STATUSES, 'active')
+    : 'active'
+  const genderFilter = readEnum(searchParams, 'gender', MEMBER_GENDERS, '')
+  const ageFilter = readEnum(searchParams, 'age', MEMBER_AGES, '')
+  const [searchInput, setSearchInput] = useSearchInput(search)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const memberList = usePagedList<MemberSummary>(getErrorMessage)
   const { items: members, loadMore, replace: replaceMembers } = memberList
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [lifeGroupFilter, setLifeGroupFilter] = useState(() => searchParams.get('lifeGroupId') ?? '')
-  const [statusFilter, setStatusFilter] = useState<MemberListStatus>(() => {
-    const value = searchParams.get('status')
-    return value === 'archived' || value === 'all' ? value : 'active'
-  })
-  const [genderFilter, setGenderFilter] = useState<MemberGenderFilter | ''>(() => {
-    const value = searchParams.get('gender')
-    return value === 'male' || value === 'female' || value === 'not_set' ? value : ''
-  })
-  const [ageFilter, setAgeFilter] = useState<MemberAgeFilter | ''>(() => {
-    const value = searchParams.get('age')
-    return value === 'under_18' || value === '18_24' || value === '25_34' || value === '35_44' || value === '45_54' || value === '55_plus' || value === 'not_set' ? value : ''
-  })
   const [formContext, setFormContext] = useState<MemberFormContext | null>(null)
   const [detailMemberId, setDetailMemberId] = useState<string | null>(null)
   const [detailMember, setDetailMember] = useState<Member | null>(null)
@@ -116,6 +146,7 @@ export function MembersPage() {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [archiveTarget, setArchiveTarget] = useState<MemberSummary | null>(null)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
 
   const detailMemberImageId = detailMember?.id ?? null
   const loadMemberPhoto = useCallback(async () => {
@@ -143,17 +174,15 @@ export function MembersPage() {
     ? activeLifeGroups.length > 0
     : Boolean(ownLifeGroup?.isActive)
 
+  // Built from primitives so an unchanged URL never triggers a reload.
   const memberFilters = useMemo(
-    () =>
-      isAdmin
-        ? {
-            ...(lifeGroupFilter ? { lifeGroupId: lifeGroupFilter } : {}),
-            ...(search ? { search } : {}),
-            status: statusFilter,
-            ...(genderFilter ? { gender: genderFilter } : {}),
-            ...(ageFilter ? { age: ageFilter } : {}),
-          }
-        : { ...(search ? { search } : {}) },
+    () => ({
+      ...(lifeGroupFilter ? { lifeGroupId: lifeGroupFilter } : {}),
+      ...(search ? { search } : {}),
+      ...(isAdmin ? { status: statusFilter } : {}),
+      ...(genderFilter ? { gender: genderFilter } : {}),
+      ...(ageFilter ? { age: ageFilter } : {}),
+    }),
     [ageFilter, genderFilter, isAdmin, lifeGroupFilter, search, statusFilter],
   )
 
@@ -189,32 +218,58 @@ export function MembersPage() {
     return () => window.clearTimeout(loadTimer)
   }, [loadDirectory])
 
+  // Loads the open Member; a response for a closed or replaced dialog is ignored.
+  useEffect(() => {
+    if (!detailMemberId) return
+    let isCurrent = true
+    void (async () => {
+      try {
+        const loadedMember = await getMember(await getAccessToken(), detailMemberId)
+        if (isCurrent) setDetailMember(loadedMember)
+      } catch (error) {
+        if (isCurrent) setDetailError(getErrorMessage(error))
+      } finally {
+        if (isCurrent) setIsDetailLoading(false)
+      }
+    })()
+    return () => {
+      isCurrent = false
+    }
+  }, [detailMemberId])
+
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSearch(searchInput.trim())
+    updateListParams({ search: searchInput.trim() })
   }
 
   function clearSearch() {
     setSearchInput('')
-    setSearch('')
+    updateListParams({ search: '' })
   }
 
-  async function openDetails(member: MemberSummary) {
+  /** Empty-state actions: clear, then return focus to the search field. */
+  function clearSearchAndFocus() {
+    clearSearch()
+    searchInputRef.current?.focus()
+  }
+
+  function clearFiltersAndFocus() {
+    setSearchInput('')
+    resetListParams()
+    searchInputRef.current?.focus()
+  }
+
+  function openDetails(member: MemberSummary) {
+    // Re-selecting the open Member would not re-run the loading effect.
+    if (member.id === detailMemberId) return
     setDetailMemberId(member.id)
     setDetailMember(null)
     setDetailError(null)
     setIsDetailLoading(true)
-    try {
-      const token = await getAccessToken()
-      setDetailMember(await getMember(token, member.id))
-    } catch (error) {
-      setDetailError(getErrorMessage(error))
-    } finally {
-      setIsDetailLoading(false)
-    }
   }
 
   function closeDetails() {
+    setIsDetailLoading(false)
     setDetailMemberId(null)
     setDetailMember(null)
     setDetailError(null)
@@ -231,7 +286,7 @@ export function MembersPage() {
       {
         icon: Eye,
         label: 'View Member details',
-        onSelect: () => void openDetails(member),
+        onSelect: () => openDetails(member),
       },
       {
         icon: Pencil,
@@ -243,7 +298,7 @@ export function MembersPage() {
       actions.push({
         icon: Archive,
         label: 'Archive Member',
-        onSelect: () => setArchiveTarget(member),
+        onSelect: () => openArchive(member),
       })
     }
     return actions
@@ -266,10 +321,20 @@ export function MembersPage() {
     void loadDirectory()
   }
 
+  function openArchive(member: MemberSummary) {
+    setArchiveError(null)
+    setArchiveTarget(member)
+  }
+
+  function closeArchive() {
+    setArchiveError(null)
+    setArchiveTarget(null)
+  }
+
   async function handleArchive() {
     if (!archiveTarget) return
     setIsArchiving(true)
-    setLoadError(null)
+    setArchiveError(null)
     setNotice(null)
     try {
       const token = await getAccessToken()
@@ -282,14 +347,15 @@ export function MembersPage() {
       setDetailMember(null)
       await loadDirectory()
     } catch (error) {
-      setLoadError(getErrorMessage(error))
+      setArchiveError(getErrorMessage(error))
     } finally {
       setIsArchiving(false)
     }
   }
 
+  // Filters other than the text search; Admin-only filters are always blank for Leaders.
   const hasFilters = Boolean(
-    search || genderFilter || ageFilter || (isAdmin && (lifeGroupFilter || statusFilter !== 'active')),
+    genderFilter || ageFilter || lifeGroupFilter || statusFilter !== 'active',
   )
 
   return (
@@ -343,36 +409,44 @@ export function MembersPage() {
                 : `Scope: ${ownLifeGroup?.name ?? 'No assigned Life Group'} / Active only`}
             </p>
           </div>
-          {!isLoading && (
-            <p className="font-mono text-xs text-muted" aria-live="polite">
-              {memberList.total} {memberList.total === 1 ? 'Member' : 'Members'}
-            </p>
-          )}
+          <p className="font-mono text-xs text-muted" role="status" aria-live="polite">
+            {isLoading ? 'Loading…' : `${memberList.total} ${memberList.total === 1 ? 'Member' : 'Members'}`}
+          </p>
         </div>
 
         <form
-          className="grid gap-4 md:grid-cols-[minmax(14rem,1fr)_auto] xl:grid-cols-[minmax(16rem,1fr)_14rem_10rem_auto]"
+          className={cn(
+            'grid items-end gap-4 md:grid-cols-2',
+            // Admin: search on its own row, then all four filters in one row.
+            isAdmin
+              ? 'lg:grid-cols-4'
+              : 'xl:grid-cols-[minmax(18rem,40rem)_repeat(2,minmax(8rem,11rem))]',
+          )}
           onSubmit={handleSearch}
         >
-          <FormField
-            id="member-search"
-            label="Search"
-            description="Name, phone, email, or address"
+          <div
+            className={cn(
+              'max-w-3xl',
+              isAdmin ? 'md:col-span-2 lg:col-span-4' : 'md:col-span-2 xl:col-span-1',
+            )}
           >
-            <TextInput
+            <SearchControl
               id="member-search"
-              type="search"
-              value={searchInput}
+              inputRef={searchInputRef}
+              description="Name, phone, email, or address"
               placeholder="Search Members"
-              onChange={(event) => setSearchInput(event.target.value)}
+              value={searchInput}
+              isApplied={Boolean(search)}
+              onChange={setSearchInput}
+              onClear={clearSearch}
             />
-          </FormField>
+          </div>
           {isAdmin && (
             <FormField id="member-life-group-filter" label="Life Group">
               <Select
                 id="member-life-group-filter"
                 value={lifeGroupFilter}
-                onChange={(event) => setLifeGroupFilter(event.target.value)}
+                onChange={(event) => updateListParams({ lifeGroupId: event.target.value })}
               >
                 <option value="">All Life Groups</option>
                 {lifeGroups.map((lifeGroup) => (
@@ -384,7 +458,7 @@ export function MembersPage() {
             </FormField>
           )}
           <FormField id="member-gender-filter" label="Gender">
-            <Select id="member-gender-filter" value={genderFilter} onChange={(event) => setGenderFilter(event.target.value as MemberGenderFilter | '')}>
+            <Select id="member-gender-filter" value={genderFilter} onChange={(event) => updateListParams({ gender: event.target.value })}>
               <option value="">All genders</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
@@ -392,7 +466,7 @@ export function MembersPage() {
             </Select>
           </FormField>
           <FormField id="member-age-filter" label="Age">
-            <Select id="member-age-filter" value={ageFilter} onChange={(event) => setAgeFilter(event.target.value as MemberAgeFilter | '')}>
+            <Select id="member-age-filter" value={ageFilter} onChange={(event) => updateListParams({ age: event.target.value })}>
               <option value="">All ages</option>
               <option value="under_18">Under 18</option>
               <option value="18_24">18–24</option>
@@ -408,9 +482,7 @@ export function MembersPage() {
               <Select
                 id="member-status-filter"
                 value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as MemberListStatus)
-                }
+                onChange={(event) => updateListParams({ status: event.target.value })}
               >
                 <option value="active">Active</option>
                 <option value="archived">Archived</option>
@@ -418,17 +490,6 @@ export function MembersPage() {
               </Select>
             </FormField>
           )}
-          <div className="flex items-end gap-2 md:justify-end">
-            <Button type="submit" variant="secondary">
-              <Search aria-hidden="true" className="size-4" />
-              Search
-            </Button>
-            {search && (
-              <Button type="button" variant="ghost" onClick={clearSearch}>
-                Clear
-              </Button>
-            )}
-          </div>
         </form>
       </section>
 
@@ -443,15 +504,21 @@ export function MembersPage() {
           description={loadError}
           action={<Button onClick={() => void loadDirectory()}>Try again</Button>}
         />
+      ) : members.length === 0 && (search || hasFilters) ? (
+        <FilteredEmptyState
+          icon={UsersRound}
+          plural="Members"
+          search={search}
+          searchFields="name, phone, email, or address"
+          hasFilters={hasFilters}
+          onClearFilters={clearFiltersAndFocus}
+          onClearSearch={clearSearchAndFocus}
+        />
       ) : members.length === 0 ? (
         <EmptyState
           icon={UsersRound}
-          title={hasFilters ? 'No Members match these controls' : 'No Members yet'}
-          description={
-            hasFilters
-              ? 'Adjust the search or filters to review a different authorized set.'
-              : 'Use New Member when the first Member is ready to be added.'
-          }
+          title="No Members yet"
+          description="Use New Member when the first Member is ready to be added."
         />
       ) : (
         <ResponsiveTable
@@ -607,7 +674,7 @@ export function MembersPage() {
                   onClick={() => {
                     setDetailMemberId(null)
                     setDetailMember(null)
-                    setArchiveTarget(detailMember)
+                    openArchive(detailMember)
                   }}
                 >
                   <Archive aria-hidden="true" className="size-4" />
@@ -622,7 +689,7 @@ export function MembersPage() {
       <Modal
         className="max-w-md"
         isOpen={Boolean(archiveTarget)}
-        onClose={() => setArchiveTarget(null)}
+        onClose={closeArchive}
         preventClose={isArchiving}
         title="Archive Member?"
         description={
@@ -631,11 +698,14 @@ export function MembersPage() {
             : undefined
         }
       >
+        {archiveError && (
+          <FeedbackBanner className="mb-5" tone="error">{archiveError}</FeedbackBanner>
+        )}
         <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
           <Button
             variant="secondary"
             disabled={isArchiving}
-            onClick={() => setArchiveTarget(null)}
+            onClick={closeArchive}
           >
             Cancel
           </Button>

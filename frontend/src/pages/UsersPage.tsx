@@ -4,20 +4,22 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   ShieldCheck,
   Trash2,
   UserCheck,
   UserX,
 } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { useAuth } from '../auth/useAuth'
 import { DeactivateUserDialog } from '../components/users/DeactivateUserDialog'
 import { getLedActiveGroup } from '../components/users/ledLifeGroup'
 import { ResetPasswordModal } from '../components/users/ResetPasswordModal'
 import { UserActivityList } from '../components/users/UserActivityList'
-import { UserProfileDetails } from '../components/users/UserProfileDetails'
+import {
+  UserProfileDetails,
+  UserStatusBadge,
+} from '../components/users/UserProfileDetails'
 import { UserFormModal, type UserFormContext } from '../components/users/UserFormModal'
 import { Button } from '../components/ui/Button'
 import {
@@ -26,7 +28,9 @@ import {
   FeedbackBanner,
   LoadingState,
 } from '../components/ui/Feedback'
-import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { FilteredEmptyState } from '../components/ui/FilteredEmptyState'
+import { FormField, Select } from '../components/ui/FormControls'
+import { SearchControl } from '../components/ui/SearchControl'
 import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -49,8 +53,18 @@ import {
   type UserListStatus,
 } from '../lib/api'
 import { formatTimestampDate } from '../lib/dates'
+import {
+  readEnum,
+  readSearch,
+  useListSearchParams,
+  useSearchInput,
+} from '../lib/listSearchParams'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
+import { usePageTitle } from '../lib/usePageTitle'
+
+const USER_STATUSES: readonly UserListStatus[] = ['active', 'inactive', 'all', 'deleted']
+const USER_LIST_DEFAULTS = { search: '', status: 'active' }
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -62,7 +76,10 @@ function formatLastSignIn(value: string | null) {
   return formatTimestampDate(value)
 }
 
+/** Mirrors the server filters: only `deleted` lists deleted users, and `all` excludes them. */
 function matchesStatus(user: ManagedUser, status: UserListStatus) {
+  if (status === 'deleted') return user.deletedAt !== null
+  if (user.deletedAt !== null) return false
   return status === 'all' || user.isActive === (status === 'active')
 }
 
@@ -77,7 +94,17 @@ function lifeGroupWarning(user: ManagedUser) {
 }
 
 export function UsersPage() {
+  usePageTitle('Users')
   const { actor } = useAuth()
+  const {
+    reset: resetListParams,
+    searchParams,
+    update: updateListParams,
+  } = useListSearchParams(USER_LIST_DEFAULTS)
+  const search = readSearch(searchParams)
+  const statusFilter = readEnum(searchParams, 'status', USER_STATUSES, 'active')
+  const [searchInput, setSearchInput] = useSearchInput(search)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const userList = usePagedList<ManagedUser>(getErrorMessage)
   const {
     insertSorted: insertUser,
@@ -90,9 +117,6 @@ export function UsersPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<UserListStatus>('active')
   const [formContext, setFormContext] = useState<UserFormContext | null>(null)
   const [passwordUser, setPasswordUser] = useState<ManagedUser | null>(null)
   const [deactivateTarget, setDeactivateTarget] = useState<ManagedUser | null>(null)
@@ -151,13 +175,27 @@ export function UsersPage() {
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSearch(searchInput.trim())
+    updateListParams({ search: searchInput.trim() })
   }
 
   function clearSearch() {
     setSearchInput('')
-    setSearch('')
+    updateListParams({ search: '' })
   }
+
+  /** Empty-state actions: clear, then return focus to the search field. */
+  function clearSearchAndFocus() {
+    clearSearch()
+    searchInputRef.current?.focus()
+  }
+
+  function clearFiltersAndFocus() {
+    setSearchInput('')
+    resetListParams()
+    searchInputRef.current?.focus()
+  }
+
+  const hasFilters = statusFilter !== 'active'
 
   /** Replaces, adds, or removes a row in place, respecting the current status filter. */
   function applyUser(updated: ManagedUser) {
@@ -202,19 +240,24 @@ export function UsersPage() {
     )
   }
 
+  /** Hands a Leader's active group to the chosen successor before they lose access. */
+  async function handOverLifeGroup(accessToken: string, user: ManagedUser, replacementId: string) {
+    const ledGroup = getLedActiveGroup(user)
+    if (!ledGroup || !replacementId) return ''
+    // Hand the group over first so it is never left without an active Leader.
+    const group = await reassignLifeGroupLeader(accessToken, ledGroup.id, replacementId)
+    return ` ${group.name} is now led by ${group.leader.name}.`
+  }
+
   async function changeStatus(user: ManagedUser, isActive: boolean, replacementId = '') {
     setChangingUserId(user.id)
     setNotice(null)
     setActionError(null)
     try {
       const accessToken = await getAccessToken()
-      const ledGroup = isActive ? null : getLedActiveGroup(user)
-      let handoverNotice = ''
-      if (ledGroup && replacementId) {
-        // Hand the group over first so it is never left without an active Leader.
-        const group = await reassignLifeGroupLeader(accessToken, ledGroup.id, replacementId)
-        handoverNotice = ` ${group.name} is now led by ${group.leader.name}.`
-      }
+      const handoverNotice = isActive
+        ? ''
+        : await handOverLifeGroup(accessToken, user, replacementId)
       const updated = await setUserActive(accessToken, user.id, isActive)
       applyUser(updated)
       setDeactivateTarget(null)
@@ -229,15 +272,20 @@ export function UsersPage() {
     }
   }
 
-  async function removeUser(user: ManagedUser) {
+  async function removeUser(user: ManagedUser, replacementId: string) {
     setChangingUserId(user.id)
     setNotice(null)
     setActionError(null)
     try {
-      await deleteUser(await getAccessToken(), user.id)
+      const accessToken = await getAccessToken()
+      const handoverNotice = await handOverLifeGroup(accessToken, user, replacementId)
+      await deleteUser(accessToken, user.id)
       removeUserRow(user.id)
       setDeleteTarget(null)
-      setNotice(`${user.name} was permanently deleted.`)
+      setNotice(
+        `${user.name} was deleted. Their history was kept.` +
+          (handoverNotice || lifeGroupWarning(user)),
+      )
     } catch (error) {
       setActionError(getErrorMessage(error))
     } finally {
@@ -252,12 +300,15 @@ export function UsersPage() {
 
   function getRowActions(user: ManagedUser): RowAction[] {
     const isSelf = user.id === actor?.id
+    const viewProfile: RowAction = {
+      icon: Eye,
+      label: 'View profile',
+      onSelect: () => void openProfile(user),
+    }
+    // A deleted user is read-only; their profile and activity stay viewable.
+    if (user.deletedAt) return [viewProfile]
     return [
-      {
-        icon: Eye,
-        label: 'View profile',
-        onSelect: () => void openProfile(user),
-      },
+      viewProfile,
       {
         icon: Pencil,
         label: 'Edit user',
@@ -334,48 +385,37 @@ export function UsersPage() {
             </p>
             <p className="mt-1 text-sm text-muted">Search by name or email within a status.</p>
           </div>
-          {!isLoading && (
-            <p className="font-mono text-xs text-muted" aria-live="polite">
-              {userList.total} {userList.total === 1 ? 'User' : 'Users'}
-            </p>
-          )}
+          <p className="font-mono text-xs text-muted" role="status" aria-live="polite">
+            {isLoading ? 'Loading…' : `${userList.total} ${userList.total === 1 ? 'User' : 'Users'}`}
+          </p>
         </div>
         <form
-          className="grid gap-4 md:grid-cols-[minmax(14rem,1fr)_12rem_auto]"
+          className="grid items-end gap-4 lg:grid-cols-[minmax(0,40rem)_12rem]"
           onSubmit={handleSearch}
         >
-          <FormField id="user-search" label="Search" description="Name or email">
-            <TextInput
-              id="user-search"
-              type="search"
-              value={searchInput}
-              maxLength={100}
-              placeholder="Search Users"
-              onChange={(event) => setSearchInput(event.target.value)}
-            />
-          </FormField>
+          <SearchControl
+            id="user-search"
+            inputRef={searchInputRef}
+            description="Name or email"
+            placeholder="Search Users"
+            maxLength={100}
+            value={searchInput}
+            isApplied={Boolean(search)}
+            onChange={setSearchInput}
+            onClear={clearSearch}
+          />
           <FormField id="user-status-filter" label="Status">
             <Select
               id="user-status-filter"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as UserListStatus)}
+              onChange={(event) => updateListParams({ status: event.target.value })}
             >
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="all">All</option>
+              <option value="deleted">Deleted</option>
             </Select>
           </FormField>
-          <div className="flex items-end gap-2 md:justify-end">
-            <Button type="submit" variant="secondary">
-              <Search aria-hidden="true" className="size-4" />
-              Search
-            </Button>
-            {search && (
-              <Button type="button" variant="ghost" onClick={clearSearch}>
-                Clear
-              </Button>
-            )}
-          </div>
         </form>
       </section>
 
@@ -387,15 +427,21 @@ export function UsersPage() {
           description={loadError}
           action={<Button onClick={() => void loadData()}>Try again</Button>}
         />
+      ) : users.length === 0 && (search || hasFilters) ? (
+        <FilteredEmptyState
+          icon={ShieldCheck}
+          plural="Users"
+          search={search}
+          searchFields="name or email"
+          hasFilters={hasFilters}
+          onClearFilters={clearFiltersAndFocus}
+          onClearSearch={clearSearchAndFocus}
+        />
       ) : users.length === 0 ? (
         <EmptyState
           icon={ShieldCheck}
-          title={search ? 'No matching Users' : 'No Users in this status'}
-          description={
-            search
-              ? 'Try a different name or email, or clear the search.'
-              : 'Change the status filter or use New User above to add a staff account.'
-          }
+          title="No Users in this status"
+          description="Change the status filter or use New User above to add a staff account."
         />
       ) : (
         <ResponsiveTable caption="Staff user accounts" tableClassName="horizon-table--users">
@@ -447,9 +493,7 @@ export function UsersPage() {
                 </td>
                 <td>
                   <span className="hm-table-mobile-label">Status</span>
-                  <StatusBadge tone={user.isActive ? 'success' : 'neutral'}>
-                    {user.isActive ? 'Active' : 'Inactive'}
-                  </StatusBadge>
+                  <UserStatusBadge user={user} />
                 </td>
                 <td>
                   <span className="hm-table-mobile-label">Last sign-in</span>
@@ -511,17 +555,18 @@ export function UsersPage() {
           <Button variant="secondary" onClick={() => setProfileUser(null)}>
             Close
           </Button>
-          <Button
-            onClick={() => {
-              if (!profileUser) return
-              const user = profileUser
-              setProfileUser(null)
-              openFormFor({ mode: 'edit', user })
-            }}
-          >
-            <Pencil aria-hidden="true" className="size-4" />
-            Edit user
-          </Button>
+          {profileUser && !profileUser.deletedAt && (
+            <Button
+              onClick={() => {
+                const user = profileUser
+                setProfileUser(null)
+                openFormFor({ mode: 'edit', user })
+              }}
+            >
+              <Pencil aria-hidden="true" className="size-4" />
+              Edit user
+            </Button>
+          )}
         </div>
       </Modal>
 
@@ -553,43 +598,19 @@ export function UsersPage() {
         />
       )}
 
-      <Modal
-        className="max-w-md"
-        isOpen={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        preventClose={Boolean(changingUserId)}
-        title="Delete user permanently?"
-        description={
-          deleteTarget
-            ? `${deleteTarget.name} and their sign-in will be removed. This cannot be undone. Users with Horizon history cannot be deleted — deactivate them instead.`
-            : undefined
-        }
-      >
-        {actionError && (
-          <FeedbackBanner className="mb-5" tone="error">
-            {actionError}
-          </FeedbackBanner>
-        )}
-        <div className="flex flex-col-reverse gap-2 border-t border-line pt-5 sm:flex-row sm:justify-end">
-          <Button
-            variant="secondary"
-            disabled={Boolean(changingUserId)}
-            onClick={() => setDeleteTarget(null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            isLoading={Boolean(changingUserId)}
-            onClick={() => {
-              if (deleteTarget) void removeUser(deleteTarget)
-            }}
-          >
-            <Trash2 aria-hidden="true" className="size-4" />
-            Delete user
-          </Button>
-        </div>
-      </Modal>
+      {deleteTarget && (
+        <DeactivateUserDialog
+          key={deleteTarget.id}
+          mode="delete"
+          user={deleteTarget}
+          error={actionError}
+          isSubmitting={Boolean(changingUserId)}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={(replacementLeaderId) =>
+            void removeUser(deleteTarget, replacementLeaderId)
+          }
+        />
+      )}
     </div>
   )
 }

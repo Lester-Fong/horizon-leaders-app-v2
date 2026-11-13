@@ -420,6 +420,7 @@ export function createSupabaseOpenCellService({
         .from("opencell_sessions")
         .update(sessionUpdate)
         .eq("id", sessionId)
+        .eq("programme_id", programmeId)
         .select(SESSION_COLUMNS)
         .single();
       if (error) throw serviceUnavailable();
@@ -440,6 +441,7 @@ export function createSupabaseOpenCellService({
         .from("opencell_sessions")
         .update({ is_cancelled: true })
         .eq("id", sessionId)
+        .eq("programme_id", programmeId)
         .select(SESSION_COLUMNS)
         .single();
       if (error) throw serviceUnavailable();
@@ -526,6 +528,9 @@ export function createSupabaseOpenCellService({
 
     async removeAttendance(_actor, programmeId, sessionId, visitorId) {
       await getActiveProgrammeRow(programmeId);
+      // The Session must belong to this active Programme; otherwise any active
+      // Programme ID could be used to delete a finished Programme's attendance.
+      await getSessionRow(programmeId, sessionId);
       const { data, error } = await supabase
         .from("opencell_attendance")
         .delete()

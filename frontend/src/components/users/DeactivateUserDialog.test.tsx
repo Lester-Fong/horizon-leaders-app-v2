@@ -22,6 +22,7 @@ function leaderUser(id: string, name: string, groupName: string): ManagedUser {
   return {
     assignedLifeGroup: { id: `${id}-group`, isActive: true, name: groupName },
     createdAt: '2026-01-01T00:00:00.000Z',
+    deletedAt: null,
     email: `${id}@example.test`,
     id,
     isActive: true,
@@ -33,7 +34,7 @@ function leaderUser(id: string, name: string, groupName: string): ManagedUser {
 }
 
 function leaderOption(id: string, name: string): LeaderOption {
-  return { assignedLifeGroup: null, id, isActive: true, name }
+  return { assignedLifeGroup: null, id, isActive: true, isDeleted: false, name }
 }
 
 function deferred<T>() {
@@ -47,10 +48,15 @@ function deferred<T>() {
 const leaderA = leaderUser('leader-a', 'Ana Leader', 'North Group')
 const leaderB = leaderUser('leader-b', 'Ben Leader', 'South Group')
 
-function renderDialog(user: ManagedUser, onConfirm = vi.fn()) {
+function renderDialog(
+  user: ManagedUser,
+  onConfirm = vi.fn(),
+  mode: 'deactivate' | 'delete' = 'deactivate',
+) {
   const view = render(
     <DeactivateUserDialog
       key={user.id}
+      mode={mode}
       user={user}
       error={null}
       isSubmitting={false}
@@ -143,6 +149,40 @@ describe('DeactivateUserDialog', () => {
     await act(async () => forB.resolve([leaderOption('successor', 'Sam Successor')]))
     expect(within(select).getByRole('option', { name: 'Sam Successor' })).toBeInTheDocument()
     expect(within(select).queryByRole('option', { name: 'Ben Leader' })).toBeNull()
+  })
+
+  it('never offers a deleted user as the successor', async () => {
+    apiMock.getLeaderOptions.mockResolvedValue([
+      { ...leaderOption('gone', 'Gina Gone'), isActive: false, isDeleted: true },
+      leaderOption('successor', 'Sam Successor'),
+    ])
+    renderDialog(leaderA)
+
+    const select = screen.getByRole('combobox', { name: /New Leader/ })
+    await screen.findByRole('option', { name: 'Sam Successor' })
+    expect(within(select).queryByRole('option', { name: /Gina Gone/ })).toBeNull()
+  })
+
+  it('uses the delete copy and still requires a Life Group handover choice', async () => {
+    apiMock.getLeaderOptions.mockResolvedValue([leaderOption('successor', 'Sam Successor')])
+    const { onConfirm } = renderDialog(leaderA, vi.fn(), 'delete')
+
+    expect(screen.getByRole('dialog', { name: 'Delete user?' })).toHaveAccessibleDescription(
+      "Ana Leader's sign-in will be removed permanently and they will leave the Users list. Their name stays on past Horizon records and in the activity log, and the email can be used for a new account. This cannot be undone.",
+    )
+    expect(
+      screen.getByText('Ana Leader leads North Group. Choose who takes over before you delete them.'),
+    ).toBeInTheDocument()
+    const deleteButton = screen.getByRole('button', { name: 'Delete user' })
+    expect(deleteButton).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Deactivate user' })).toBeNull()
+
+    await userEvent.selectOptions(
+      await screen.findByRole('combobox', { name: /New Leader/ }),
+      'Sam Successor',
+    )
+    await userEvent.click(deleteButton)
+    expect(onConfirm).toHaveBeenLastCalledWith('successor')
   })
 
   it('lets a non-leading user be deactivated without loading Leaders', async () => {

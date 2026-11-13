@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 
 import { EmptyState } from '../components/ui/Feedback'
 import { PageHeader } from '../components/ui/PageHeader'
+import { usePageTitle } from '../lib/usePageTitle'
 
 interface ModulePlaceholderPageProps {
   description: string
@@ -14,6 +15,7 @@ export function ModulePlaceholderPage({
   icon,
   title,
 }: ModulePlaceholderPageProps) {
+  usePageTitle(title)
   return (
     <div className="space-y-8">
       <PageHeader

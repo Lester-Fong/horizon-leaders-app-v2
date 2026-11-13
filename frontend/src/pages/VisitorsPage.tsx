@@ -4,11 +4,10 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   Users,
   UserRoundPlus,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { useAuth } from '../auth/useAuth'
 import {
@@ -17,7 +16,10 @@ import {
 } from '../components/visitors/VisitorFormModal'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, FeedbackBanner, LoadingState } from '../components/ui/Feedback'
-import { FormField, Select, TextInput } from '../components/ui/FormControls'
+import { FilteredEmptyState } from '../components/ui/FilteredEmptyState'
+import { FormField, Select } from '../components/ui/FormControls'
+import { SearchControl } from '../components/ui/SearchControl'
+import { cn } from '../lib/cn'
 import { LoadMoreFooter } from '../components/ui/LoadMoreFooter'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -38,12 +40,30 @@ import {
   type VisitorInput,
   type VisitorListStatus,
 } from '../lib/api'
+import {
+  readEnum,
+  readSearch,
+  useListSearchParams,
+  useSearchInput,
+} from '../lib/listSearchParams'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
+import { usePageTitle } from '../lib/usePageTitle'
+
+const VISITOR_STATUSES: readonly VisitorListStatus[] = ['active', 'converted', 'all']
+const VISITOR_LIST_DEFAULTS = { search: '', status: 'active' }
+
+const VISITOR_UNAVAILABLE_NOTICE = 'This Visitor is no longer active.'
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
   return 'Visitor data is unavailable right now. Please try again.'
+}
+
+/** The Visitor was converted or removed by someone else, so this action no longer applies. */
+function isVisitorUnavailableError(error: unknown) {
+  return error instanceof ApiError &&
+    (error.code === 'VISITOR_NOT_ACTIVE' || error.code === 'VISITOR_NOT_FOUND')
 }
 
 function DetailItem({ label, value }: { label: string; value: string }) {
@@ -56,17 +76,27 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 }
 
 export function VisitorsPage() {
+  usePageTitle('Visitors')
   const { actor } = useAuth()
   const isAdmin = actor?.role === 'admin'
+  const {
+    reset: resetListParams,
+    searchParams,
+    update: updateListParams,
+  } = useListSearchParams(VISITOR_LIST_DEFAULTS)
+  const search = readSearch(searchParams)
+  // Leaders only see active Visitors; a status in the URL is ignored for them.
+  const statusFilter = isAdmin
+    ? readEnum(searchParams, 'status', VISITOR_STATUSES, 'active')
+    : 'active'
+  const [searchInput, setSearchInput] = useSearchInput(search)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const visitorList = usePagedList<Visitor>(getErrorMessage)
   const { items: visitors, loadMore, replace: replaceVisitors } = visitorList
   const [lifeGroups, setLifeGroups] = useState<LifeGroup[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<VisitorListStatus>('active')
+  const [notice, setNotice] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null)
   const [formContext, setFormContext] = useState<VisitorFormContext | null>(null)
   const [detailVisitorId, setDetailVisitorId] = useState<string | null>(null)
   const [detailVisitor, setDetailVisitor] = useState<Visitor | null>(null)
@@ -144,26 +174,58 @@ export function VisitorsPage() {
     return () => window.clearTimeout(timer)
   }, [loadDirectory])
 
+  // Loads the open Visitor; a response for a closed or replaced dialog is ignored.
+  useEffect(() => {
+    if (!detailVisitorId) return
+    let isCurrent = true
+    void (async () => {
+      try {
+        const loadedVisitor = await getVisitor(await getAccessToken(), detailVisitorId)
+        if (isCurrent) setDetailVisitor(loadedVisitor)
+      } catch (error) {
+        if (isCurrent) setDetailError(getErrorMessage(error))
+      } finally {
+        if (isCurrent) setIsDetailLoading(false)
+      }
+    })()
+    return () => {
+      isCurrent = false
+    }
+  }, [detailVisitorId])
+
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSearch(searchInput.trim())
+    updateListParams({ search: searchInput.trim() })
   }
 
-  async function openDetails(visitor: Visitor) {
+  function clearSearch() {
+    setSearchInput('')
+    updateListParams({ search: '' })
+  }
+
+  /** Empty-state actions: clear, then return focus to the search field. */
+  function clearSearchAndFocus() {
+    clearSearch()
+    searchInputRef.current?.focus()
+  }
+
+  function clearFiltersAndFocus() {
+    setSearchInput('')
+    resetListParams()
+    searchInputRef.current?.focus()
+  }
+
+  function openDetails(visitor: Visitor) {
+    // Re-selecting the open Visitor would not re-run the loading effect.
+    if (visitor.id === detailVisitorId) return
     setDetailVisitorId(visitor.id)
     setDetailVisitor(null)
     setDetailError(null)
     setIsDetailLoading(true)
-    try {
-      setDetailVisitor(await getVisitor(await getAccessToken(), visitor.id))
-    } catch (error) {
-      setDetailError(getErrorMessage(error))
-    } finally {
-      setIsDetailLoading(false)
-    }
   }
 
   function closeDetails() {
+    setIsDetailLoading(false)
     setDetailVisitorId(null)
     setDetailVisitor(null)
     setDetailError(null)
@@ -185,7 +247,7 @@ export function VisitorsPage() {
   }
 
   function getRowActions(visitor: Visitor): RowAction[] {
-    const actions: RowAction[] = [{ icon: Eye, label: 'View Visitor details', onSelect: () => void openDetails(visitor) }]
+    const actions: RowAction[] = [{ icon: Eye, label: 'View Visitor details', onSelect: () => openDetails(visitor) }]
     if (visitor.status === 'active') {
       actions.push({ icon: Pencil, label: 'Edit Visitor', onSelect: () => setFormContext({ mode: 'edit', visitor }) })
       if (canManageAffiliation(visitor)) {
@@ -196,17 +258,33 @@ export function VisitorsPage() {
     return actions
   }
 
+  /** Closes every Visitor dialog, explains why, and refreshes the stale list. */
+  function handleVisitorUnavailable() {
+    setFormContext(null)
+    setConversionTarget(null)
+    setAffiliationTarget(null)
+    setNotice({ message: VISITOR_UNAVAILABLE_NOTICE, tone: 'warning' })
+    void loadDirectory()
+  }
+
   async function saveVisitor(input: VisitorInput) {
     const token = await getAccessToken()
-    return formContext?.mode === 'edit'
-      ? updateVisitor(token, formContext.visitor.id, input)
-      : createVisitor(token, input)
+    if (formContext?.mode !== 'edit') return createVisitor(token, input)
+    try {
+      return await updateVisitor(token, formContext.visitor.id, input)
+    } catch (error) {
+      if (isVisitorUnavailableError(error)) handleVisitorUnavailable()
+      throw error
+    }
   }
 
   function handleVisitorSaved(visitor: Visitor) {
     const wasEditing = formContext?.mode === 'edit'
     setFormContext(null)
-    setNotice(`${visitor.firstName} ${visitor.lastName} was ${wasEditing ? 'updated' : 'created'}.`)
+    setNotice({
+      message: `${visitor.firstName} ${visitor.lastName} was ${wasEditing ? 'updated' : 'created'}.`,
+      tone: 'success',
+    })
     void loadDirectory()
   }
 
@@ -223,13 +301,17 @@ export function VisitorsPage() {
         conversionTarget.id,
         conversionTarget.lifeGroup ? undefined : conversionGroupId,
       )
-      setNotice(`${result.visitor.firstName} ${result.visitor.lastName} was converted to a Member in ${result.member.lifeGroup.name}.`)
+      setNotice({
+        message: `${result.visitor.firstName} ${result.visitor.lastName} was converted to a Member in ${result.member.lifeGroup.name}.`,
+        tone: 'success',
+      })
       setConversionTarget(null)
       setDetailVisitorId(null)
       setDetailVisitor(null)
       await loadDirectory()
     } catch (error) {
-      setConversionError(getErrorMessage(error))
+      if (isVisitorUnavailableError(error)) handleVisitorUnavailable()
+      else setConversionError(getErrorMessage(error))
     } finally {
       setIsConverting(false)
     }
@@ -254,21 +336,24 @@ export function VisitorsPage() {
         affiliationTarget.id,
         nextLifeGroupId,
       )
-      setNotice(
-        updated.lifeGroup
+      setNotice({
+        message: updated.lifeGroup
           ? `${updated.firstName} ${updated.lastName} is now affiliated with ${updated.lifeGroup.name}.`
           : `${updated.firstName} ${updated.lastName} is now unassigned.`,
-      )
+        tone: 'success',
+      })
       setAffiliationTarget(null)
       await loadDirectory()
     } catch (error) {
-      setAffiliationError(getErrorMessage(error))
+      if (isVisitorUnavailableError(error)) handleVisitorUnavailable()
+      else setAffiliationError(getErrorMessage(error))
     } finally {
       setIsAffiliationSaving(false)
     }
   }
 
-  const hasFilters = Boolean(search || (isAdmin && statusFilter !== 'active'))
+  // Filters other than the text search; always false for Leaders.
+  const hasFilters = statusFilter !== 'active'
 
   return (
     <div className="space-y-8">
@@ -290,7 +375,7 @@ export function VisitorsPage() {
         }
       />
 
-      {notice && <FeedbackBanner tone="success">{notice}</FeedbackBanner>}
+      {notice && <FeedbackBanner tone={notice.tone}>{notice.message}</FeedbackBanner>}
       {loadError && visitors.length > 0 && <FeedbackBanner tone="error">{loadError}</FeedbackBanner>}
       {!isAdmin && !ownLifeGroup?.isActive && !loadError && (
         <FeedbackBanner tone="warning" title="An active Life Group is required for conversion">
@@ -306,25 +391,21 @@ export function VisitorsPage() {
               {isAdmin ? 'Search within the selected Visitor status.' : 'Scope: Active Visitors only'}
             </p>
           </div>
-          {!isLoading && <p className="font-mono text-xs text-muted" aria-live="polite">{visitorList.total} {visitorList.total === 1 ? 'Visitor' : 'Visitors'}</p>}
+          <p className="font-mono text-xs text-muted" role="status" aria-live="polite">
+            {isLoading ? 'Loading…' : `${visitorList.total} ${visitorList.total === 1 ? 'Visitor' : 'Visitors'}`}
+          </p>
         </div>
-        <form className="grid gap-4 md:grid-cols-[minmax(14rem,1fr)_auto] xl:grid-cols-[minmax(18rem,1fr)_11rem_auto]" onSubmit={handleSearch}>
-          <FormField id="visitor-search" label="Search" description="Name, phone, or email">
-            <TextInput id="visitor-search" type="search" value={searchInput} placeholder="Search Visitors" onChange={(event) => setSearchInput(event.target.value)} />
-          </FormField>
+        <form className={cn('grid items-end gap-4', isAdmin ? 'lg:grid-cols-[minmax(0,40rem)_12rem]' : 'max-w-2xl')} onSubmit={handleSearch}>
+          <SearchControl id="visitor-search" inputRef={searchInputRef} description="Name, phone, or email" placeholder="Search Visitors" value={searchInput} isApplied={Boolean(search)} onChange={setSearchInput} onClear={clearSearch} />
           {isAdmin && (
             <FormField id="visitor-status-filter" label="Status">
-              <Select id="visitor-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as VisitorListStatus)}>
+              <Select id="visitor-status-filter" value={statusFilter} onChange={(event) => updateListParams({ status: event.target.value })}>
                 <option value="active">Active</option>
                 <option value="converted">Converted</option>
                 <option value="all">All</option>
               </Select>
             </FormField>
           )}
-          <div className="flex items-end gap-2 md:justify-end">
-            <Button type="submit" variant="secondary"><Search aria-hidden="true" className="size-4" />Search</Button>
-            {search && <Button type="button" variant="ghost" onClick={() => { setSearchInput(''); setSearch('') }}>Clear</Button>}
-          </div>
         </form>
       </section>
 
@@ -332,11 +413,21 @@ export function VisitorsPage() {
         <LoadingState title="Loading Visitors" description="Retrieving the authorized Visitor directory." />
       ) : loadError && visitors.length === 0 ? (
         <ErrorState title="Visitors could not be loaded" description={loadError} action={<Button onClick={() => void loadDirectory()}>Try again</Button>} />
+      ) : visitors.length === 0 && (search || hasFilters) ? (
+        <FilteredEmptyState
+          icon={UserRoundPlus}
+          plural="Visitors"
+          search={search}
+          searchFields="name, phone, or email"
+          hasFilters={hasFilters}
+          onClearFilters={clearFiltersAndFocus}
+          onClearSearch={clearSearchAndFocus}
+        />
       ) : visitors.length === 0 ? (
         <EmptyState
           icon={UserRoundPlus}
-          title={hasFilters ? 'No Visitors match these controls' : 'No active Visitors yet'}
-          description={hasFilters ? 'Adjust the search or status to review a different authorized set.' : 'Use New Visitor when someone is ready to be recorded.'}
+          title="No active Visitors yet"
+          description="Use New Visitor when someone is ready to be recorded."
         />
       ) : (
         <ResponsiveTable caption="Authorized Visitor directory" tableClassName="horizon-table--visitors">

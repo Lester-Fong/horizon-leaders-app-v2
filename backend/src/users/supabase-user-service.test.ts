@@ -30,9 +30,12 @@ const CHAINABLE_METHODS = [
   "eq",
   "in",
   "insert",
+  "is",
   "limit",
   "neq",
+  "not",
   "or",
+  "range",
   "order",
   "select",
   "update",
@@ -71,6 +74,7 @@ function hasOperation(query: RecordedQuery, method: string) {
 function profileRow(id: string, name: string) {
   return {
     created_at: "2026-11-01T00:00:00.000Z",
+    deleted_at: null as string | null,
     id,
     is_active: true,
     name,
@@ -81,10 +85,16 @@ function profileRow(id: string, name: string) {
 
 function setupFakeSupabase({
   activityRows = [],
+  profileListRows = [],
+  profileOverrides = {},
+  profileUpdateError = null,
   profileUpdateRows = [{ id: userId }],
   rpc = async () => ({ data: null, error: null }),
 }: {
   activityRows?: unknown[];
+  profileListRows?: unknown[];
+  profileOverrides?: Partial<ReturnType<typeof profileRow>>;
+  profileUpdateError?: unknown;
   profileUpdateRows?: unknown[];
   rpc?: () => Promise<QueryResult>;
 } = {}) {
@@ -103,19 +113,29 @@ function setupFakeSupabase({
     if (query.table === "profiles") {
       if (hasOperation(query, "update")) {
         events.push("profile_update");
-        return { data: profileUpdateRows, error: null };
+        return profileUpdateError
+          ? { data: null, error: profileUpdateError }
+          : { data: profileUpdateRows, error: null };
+      }
+      if (!hasOperation(query, "maybeSingle")) {
+        return { data: profileListRows, error: null };
       }
       const idFilter = query.operations.find((operation) => operation.method === "eq");
       const id = String(idFilter?.args[1]);
-      return { data: profileRow(id, id === adminId ? "Ada Admin" : "Lee Leader"), error: null };
+      const row = profileRow(id, id === adminId ? "Ada Admin" : "Lee Leader");
+      return { data: id === adminId ? row : { ...row, ...profileOverrides }, error: null };
+    }
+
+    if (query.table === "life_groups" && !hasOperation(query, "maybeSingle")) {
+      return { data: [], error: null };
     }
 
     return { data: null, error: null };
   };
 
   const authUsers = [
-    { email: "ada@example.test", id: adminId, last_sign_in_at: null },
-    { email: "lee@example.test", id: userId, last_sign_in_at: null },
+    { app_metadata: { provider: "email" }, email: "ada@example.test", id: adminId, last_sign_in_at: null },
+    { app_metadata: { provider: "email" }, email: "lee@example.test", id: userId, last_sign_in_at: null },
   ];
 
   const client = {
@@ -281,5 +301,176 @@ describe("Supabase User service safeguards", () => {
 
     const activity = await service.listActivity(userId);
     expect(activity.map((event) => event.id)).toEqual(["event-1"]);
+  });
+
+  describe("soft delete", () => {
+    it("marks the Profile, replaces the sign-in, records the audit, then signs out", async () => {
+      const { client, events, queries, service } = setupFakeSupabase();
+
+      await expect(service.delete(admin, userId)).resolves.toEqual({ id: userId });
+      expect(events).toEqual(["profile_update", "auth_update", "audit", "revoke"]);
+
+      const profileUpdate = queries.find(
+        (query) => query.table === "profiles" && hasOperation(query, "update"),
+      );
+      const updateArgs = profileUpdate?.operations.find((op) => op.method === "update")?.args[0];
+      expect(updateArgs).toMatchObject({ is_active: false });
+      expect(typeof (updateArgs as { deleted_at: unknown }).deleted_at).toBe("string");
+      // The update only matches a Profile that is not already deleted.
+      expect(profileUpdate?.operations).toContainEqual({ args: ["deleted_at", null], method: "is" });
+
+      const [authId, attributes] = client.auth.admin.updateUserById.mock.calls[0] as unknown as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(authId).toBe(userId);
+      expect(attributes).toMatchObject({
+        app_metadata: {
+          deleted: true,
+          deleted_email: "lee@example.test",
+          must_change_password: false,
+          provider: "email",
+        },
+        ban_duration: "876000h",
+        email: `deleted+${userId}@deleted.invalid`,
+        email_confirm: true,
+      });
+      expect(String(attributes.password)).toHaveLength(64);
+
+      const audit = queries.find(
+        (query) => query.table === "user_audit_events" && hasOperation(query, "insert"),
+      );
+      expect(audit?.operations[0]?.args[0]).toMatchObject({
+        action: "user_deleted",
+        details: { email: "lee@example.test", mode: "soft", role: "leader", wasActive: true },
+      });
+      expect(client.auth.admin.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it("restores the Profile when Supabase Auth rejects the change", async () => {
+      const { client, events, queries, service } = setupFakeSupabase({
+        profileOverrides: { is_active: false },
+      });
+      client.auth.admin.updateUserById.mockResolvedValueOnce({
+        data: {},
+        error: { code: "unexpected_failure", status: 500 },
+      });
+
+      await expect(service.delete(admin, userId)).rejects.toMatchObject({
+        code: "USER_SERVICE_UNAVAILABLE",
+      });
+      // The mocked Auth failure replaces the recording implementation for this call.
+      expect(events).toEqual(["profile_update", "profile_update"]);
+      const revert = queries.filter(
+        (query) => query.table === "profiles" && hasOperation(query, "update"),
+      )[1];
+      expect(revert?.operations[0]?.args[0]).toEqual({ deleted_at: null, is_active: false });
+    });
+
+    it("reports a concurrent delete as USER_DELETED without touching Auth", async () => {
+      const { client, events, service } = setupFakeSupabase({ profileUpdateRows: [] });
+
+      await expect(service.delete(admin, userId)).rejects.toMatchObject({
+        code: "USER_DELETED",
+        status: 409,
+      });
+      expect(events).toEqual(["profile_update"]);
+      expect(client.auth.admin.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("rejects every change to a deleted user", async () => {
+      const { client, events, service } = setupFakeSupabase({
+        profileOverrides: { deleted_at: "2026-11-10T00:00:00.000Z", is_active: false },
+      });
+
+      for (const attempt of [
+        () => service.delete(admin, userId),
+        () => service.update(admin, userId, { name: "New Name" }),
+        () => service.setActive(admin, userId, true),
+        () => service.resetPassword(admin, userId, "Welcome2Horizon"),
+      ]) {
+        await expect(attempt()).rejects.toMatchObject({
+          code: "USER_DELETED",
+          message: "This user was deleted and can no longer be changed.",
+          status: 409,
+        });
+      }
+      expect(events).toEqual([]);
+      expect(client.auth.admin.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("shows a deleted user with the email they used before deletion", async () => {
+      const { client, service } = setupFakeSupabase({
+        profileOverrides: { deleted_at: "2026-11-10T00:00:00.000Z", is_active: false },
+      });
+      client.auth.admin.getUserById.mockResolvedValueOnce({
+        data: {
+          user: {
+            app_metadata: { deleted: true, deleted_email: "lee@example.test" },
+            email: `deleted+${userId}@deleted.invalid`,
+            id: userId,
+            last_sign_in_at: null,
+          },
+        },
+        error: null,
+      });
+
+      await expect(service.getById(userId)).resolves.toMatchObject({
+        deletedAt: "2026-11-10T00:00:00.000Z",
+        email: "lee@example.test",
+        isActive: false,
+      });
+    });
+  });
+
+  it.each([
+    ["active", [["is", "deleted_at", null], ["eq", "is_active", true]]],
+    ["inactive", [["is", "deleted_at", null], ["eq", "is_active", false]]],
+    ["all", [["is", "deleted_at", null]]],
+    ["deleted", [["not", "deleted_at", "is", null]]],
+  ] as const)("filters the %s status on deleted_at and is_active", async (status, filters) => {
+    const { queries, service } = setupFakeSupabase();
+
+    await service.list({ status });
+
+    const profileQuery = queries.find((query) => query.table === "profiles");
+    const filterOperations = profileQuery?.operations
+      .filter((op) => ["eq", "is", "not"].includes(op.method))
+      .map((op) => [op.method, ...op.args]);
+    expect(filterOperations).toEqual(filters);
+  });
+
+  it("maps the last-active-Admin database rule to LAST_ACTIVE_ADMIN", async () => {
+    const lastAdminError = {
+      code: "23514",
+      message: "profiles_active_admin_required: At least one active Admin is required",
+    };
+    const { events, service } = setupFakeSupabase({
+      profileOverrides: { role: "admin" },
+      profileUpdateError: lastAdminError,
+    });
+
+    for (const attempt of [
+      () => service.setActive(admin, userId, false),
+      () => service.update(admin, userId, { role: "leader" }),
+      () => service.delete(admin, userId),
+    ]) {
+      await expect(attempt()).rejects.toMatchObject({
+        code: "LAST_ACTIVE_ADMIN",
+        message: "At least one active Admin is required.",
+        status: 409,
+      });
+    }
+    expect(events).toEqual(["profile_update", "profile_update", "profile_update"]);
+  });
+
+  it("keeps other check violations as a service failure", async () => {
+    const { service } = setupFakeSupabase({
+      profileUpdateError: { code: "23514", message: "profiles_name_not_blank" },
+    });
+
+    await expect(service.setActive(admin, userId, false)).rejects.toMatchObject({
+      code: "USER_SERVICE_UNAVAILABLE",
+    });
   });
 });

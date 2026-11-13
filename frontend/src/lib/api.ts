@@ -18,6 +18,8 @@ export interface ImageAsset {
 export interface LifeGroupLeader {
   id: string
   isActive: boolean
+  /** True when an Admin deleted this user (sign-in removed, history kept). */
+  isDeleted: boolean
   name: string
 }
 
@@ -112,6 +114,8 @@ export type MemberAgeFilter = 'under_18' | '18_24' | '25_34' | '35_44' | '45_54'
 
 export interface DashboardBreakdown { count: number; key: string; label: string; percentage: number }
 export interface DashboardData {
+  /** True only for a Leader who leads no Life Group; group-scoped values are then zero/empty. */
+  isUnassignedLeader?: boolean
   memberSnapshot: { age: DashboardBreakdown[]; gender: DashboardBreakdown[] }
   metrics: { activeFollowUps: number; activeMembers?: number; activeOpenCellProgrammes: number; activeVisitors?: number; myLifeGroupMembers?: number; myLifeGroupVisitors?: number; newVisitorsThisMonth?: number }
   needsAttention: { byReason: DashboardBreakdown[]; total: number }
@@ -474,6 +478,7 @@ function isLifeGroupLeader(value: unknown): value is LifeGroupLeader {
     isRecord(value) &&
     typeof value.id === 'string' &&
     typeof value.isActive === 'boolean' &&
+    typeof value.isDeleted === 'boolean' &&
     typeof value.name === 'string'
   )
 }
@@ -991,7 +996,7 @@ const isHarvestInterestResult = (value: unknown): value is HarvestInterestResult
 
 const isSundayAttendanceRoster = (
   value: unknown,
-): value is { members: SundayAttendanceMember[] } =>
+): value is { isUnassignedLeader?: boolean; members: SundayAttendanceMember[] } =>
   isRecord(value) && Array.isArray(value.members) && value.members.every(isSundayAttendanceMember)
 
 const isSundayVisitorRoster = (
@@ -1186,6 +1191,12 @@ export function archiveMinistry(accessToken: string, ministryId: string) {
   })
 }
 
+export function reactivateMinistry(accessToken: string, ministryId: string) {
+  return requestApi(accessToken, `/ministries/${ministryId}/reactivate`, isMinistry, {
+    method: 'PATCH',
+  })
+}
+
 export function getMinistryMembers(accessToken: string, ministryId: string) {
   return requestApi(
     accessToken,
@@ -1365,7 +1376,7 @@ export function createSundayService(accessToken: string, input: SundayServiceInp
   })
 }
 
-export function updateSundayService(accessToken: string, eventId: string, input: SundayServiceInput) {
+export function updateSundayService(accessToken: string, eventId: string, input: Partial<SundayServiceInput>) {
   return requestApi(accessToken, `/events/${eventId}`, isSundayService, {
     body: JSON.stringify(input),
     method: 'PATCH',
@@ -1430,7 +1441,7 @@ export function createHarvestEvent(accessToken: string, input: HarvestEventInput
   })
 }
 
-export function updateHarvestEvent(accessToken: string, eventId: string, input: HarvestEventInput) {
+export function updateHarvestEvent(accessToken: string, eventId: string, input: Partial<HarvestEventInput>) {
   return requestApi(accessToken, `/events/harvest/${eventId}`, isHarvestEvent, {
     body: JSON.stringify(input), method: 'PATCH',
   })
@@ -1672,6 +1683,9 @@ export interface ManagedUserLifeGroup {
 export interface ManagedUser {
   assignedLifeGroup: ManagedUserLifeGroup | null
   createdAt: string
+  /** When an Admin deleted this user; deleted users are read-only. */
+  deletedAt: string | null
+  /** For a deleted user, the email they signed in with before deletion. */
   email: string | null
   id: string
   isActive: boolean
@@ -1681,7 +1695,8 @@ export interface ManagedUser {
   updatedAt: string
 }
 
-export type UserListStatus = 'active' | 'inactive' | 'all'
+/** `all` lists every user that is not deleted; `deleted` lists deleted users only. */
+export type UserListStatus = 'active' | 'inactive' | 'all' | 'deleted'
 
 export interface UserListFilters {
   search?: string
@@ -1730,6 +1745,7 @@ function isManagedUser(value: unknown): value is ManagedUser {
     isRecord(value) &&
     (value.assignedLifeGroup === null || isManagedUserLifeGroup(value.assignedLifeGroup)) &&
     typeof value.createdAt === 'string' &&
+    (typeof value.deletedAt === 'string' || value.deletedAt === null) &&
     (typeof value.email === 'string' || value.email === null) &&
     typeof value.id === 'string' &&
     typeof value.isActive === 'boolean' &&

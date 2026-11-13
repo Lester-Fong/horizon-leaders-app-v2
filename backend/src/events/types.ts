@@ -101,7 +101,8 @@ export interface EventService {
   addAttendanceByQr(actor: HorizonActor, eventId: string, qrToken: string): Promise<{ member: SundayAttendanceMember; result: "recorded" | "already_present" }>;
   close(actor: HorizonActor, eventId: string): Promise<SundayService>;
   create(actor: HorizonActor, input: SundayServiceInput): Promise<SundayService>;
-  getAttendance(actor: HorizonActor, eventId: string): Promise<{ members: SundayAttendanceMember[] }>;
+  /** `isUnassignedLeader` is true only for a Leader who leads no Life Group; their roster is then empty. */
+  getAttendance(actor: HorizonActor, eventId: string): Promise<{ isUnassignedLeader: boolean; members: SundayAttendanceMember[] }>;
   getById(actor: HorizonActor, eventId: string): Promise<SundayService>;
   list(actor: HorizonActor): Promise<{ events: SundayService[] }>;
   listVisitors(actor: HorizonActor, eventId: string): Promise<{ registrations: SundayVisitorRegistration[] }>;

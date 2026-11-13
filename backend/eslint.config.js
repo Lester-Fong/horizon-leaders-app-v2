@@ -17,4 +17,22 @@ export default defineConfig(
       },
     },
   },
+  {
+    // Test fakes must never ship in application code.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts", "src/test-support/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/test-support/**"],
+              message: "test-support is for tests only.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

@@ -2,8 +2,10 @@ import { ArrowLeft } from 'lucide-react'
 
 import { LinkButton } from '../components/ui/Button'
 import { ErrorState } from '../components/ui/Feedback'
+import { usePageTitle } from '../lib/usePageTitle'
 
 export function NotFoundPage() {
+  usePageTitle('Page not found')
   return (
     <ErrorState
       code="404"

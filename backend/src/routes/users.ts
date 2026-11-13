@@ -19,6 +19,7 @@ import {
 import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from "../users/password-policy.js";
 import { createActorRateLimit } from "../users/rate-limit.js";
 import {
+  DELETED_EMAIL_DOMAIN,
   UserServiceError,
   type UpdateUserInput,
   type UserListStatus,
@@ -31,7 +32,7 @@ const MAX_NAME_LENGTH = 120;
 const MAX_SEARCH_LENGTH = 100;
 const CREATE_FIELDS = new Set(["email", "name", "password", "role"]);
 const UPDATE_FIELDS = new Set(["email", "name", "role"]);
-const STATUSES = new Set<UserListStatus>(["active", "all", "inactive"]);
+const STATUSES = new Set<UserListStatus>(["active", "all", "deleted", "inactive"]);
 
 const handleRequest = createRequestHandler(UserServiceError, {
   code: "USER_SERVICE_UNAVAILABLE",
@@ -50,6 +51,20 @@ function readEmail(value: unknown) {
   const email = value.trim().toLowerCase();
   if (email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return undefined;
   return email;
+}
+
+/** Deleted users keep a placeholder sign-in email on this reserved domain. */
+function isReservedEmail(email: string) {
+  return email.endsWith(`@${DELETED_EMAIL_DOMAIN}`);
+}
+
+function sendReservedEmail(response: Response) {
+  return sendError(
+    response,
+    422,
+    "EMAIL_NOT_ALLOWED",
+    "This email address is reserved. Use the person's real email address.",
+  );
 }
 
 function readRole(value: unknown): AppRole | undefined {
@@ -123,7 +138,7 @@ export function createUsersRouter(
     }
 
     if (typeof status !== "string" || !STATUSES.has(status as UserListStatus)) {
-      sendInvalid(response, "Status must be active, inactive, or all.");
+      sendInvalid(response, "Status must be active, inactive, all, or deleted.");
       return;
     }
 
@@ -194,6 +209,10 @@ export function createUsersRouter(
       sendInvalid(response, "Role must be admin or leader.");
       return;
     }
+    if (isReservedEmail(email)) {
+      sendReservedEmail(response);
+      return;
+    }
     if (!isStrongPassword(request.body.password)) {
       sendWeakPassword(response);
       return;
@@ -230,6 +249,10 @@ export function createUsersRouter(
       const email = readEmail(request.body.email);
       if (!email) {
         sendInvalid(response, "A valid email address is required.");
+        return;
+      }
+      if (isReservedEmail(email)) {
+        sendReservedEmail(response);
         return;
       }
       update.email = email;

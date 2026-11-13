@@ -8,8 +8,10 @@ import { Button } from '../components/ui/Button'
 import { FeedbackBanner } from '../components/ui/Feedback'
 import { FormField, TextInput } from '../components/ui/FormControls'
 import { ThemeToggle } from '../components/ui/ThemeToggle'
+import { usePageTitle } from '../lib/usePageTitle'
 
 export function LoginPage() {
+  usePageTitle('Sign in')
   const { login, message: authMessage, status } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

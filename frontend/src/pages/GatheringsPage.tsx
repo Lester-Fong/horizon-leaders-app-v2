@@ -49,6 +49,7 @@ import {
 import { formatCalendarDate } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
+import { usePageTitle } from '../lib/usePageTitle'
 
 function errorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message
@@ -84,6 +85,7 @@ export function GatheringsPage() {
   const { lifeGroupId } = useParams()
   const navigate = useNavigate()
   const [lifeGroup, setLifeGroup] = useState<GatheringLifeGroup | null>(null)
+  usePageTitle(lifeGroup ? `${lifeGroup.name} Gatherings` : 'Gatherings')
   const gatheringList = usePagedList<LifeGroupGathering>(errorMessage)
   const {
     items: gatherings,
@@ -103,6 +105,7 @@ export function GatheringsPage() {
   const [roster, setRoster] = useState<AttendancePerson[]>([])
   const [attendanceSearch, setAttendanceSearch] = useState('')
   const [attendanceError, setAttendanceError] = useState<string | null>(null)
+  const [attendanceNotice, setAttendanceNotice] = useState<string | null>(null)
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false)
   const [changingPersonKey, setChangingPersonKey] = useState<string | null>(null)
 
@@ -156,6 +159,7 @@ export function GatheringsPage() {
     setRoster([])
     setAttendanceSearch('')
     setAttendanceError(null)
+    setAttendanceNotice(null)
     setIsAttendanceLoading(true)
     try {
       const token = await getAccessToken()
@@ -189,11 +193,44 @@ export function GatheringsPage() {
     void loadDirectory()
   }
 
+  /** Shows `person` as present or not present and adjusts the attendance counts. */
+  function applyPresence(person: AttendancePerson, isPresent: boolean) {
+    if (!attendanceTarget) return
+    const countChange = isPresent ? 1 : -1
+    setRoster((current) =>
+      current.map((currentPerson) =>
+        currentPerson.id === person.id && currentPerson.personType === person.personType
+          ? { ...currentPerson, isPresent }
+          : currentPerson,
+      ),
+    )
+    updateGatherings((current) =>
+      current.map((gathering) =>
+        gathering.id === attendanceTarget.id
+          ? {
+              ...gathering,
+              attendanceCount: Math.max(0, gathering.attendanceCount + countChange),
+            }
+          : gathering,
+      ),
+    )
+    setAttendanceTarget((current) =>
+      current
+        ? {
+            ...current,
+            attendanceCount: Math.max(0, current.attendanceCount + countChange),
+          }
+        : current,
+    )
+  }
+
   async function changeAttendance(person: AttendancePerson) {
     if (!lifeGroupId || !attendanceTarget) return
     const personKey = `${person.personType}:${person.id}`
+    const isPresent = !person.isPresent
     setChangingPersonKey(personKey)
     setAttendanceError(null)
+    setAttendanceNotice(null)
     try {
       const token = await getAccessToken()
       if (person.isPresent) {
@@ -209,40 +246,20 @@ export function GatheringsPage() {
           await markGatheringVisitorAttendance(token, lifeGroupId, attendanceTarget.id, person.id)
         }
       }
-      const isPresent = !person.isPresent
-      setRoster((current) =>
-        current.map((currentPerson) =>
-          currentPerson.id === person.id && currentPerson.personType === person.personType
-            ? { ...currentPerson, isPresent }
-            : currentPerson,
-        ),
-      )
-      updateGatherings((current) =>
-        current.map((gathering) =>
-          gathering.id === attendanceTarget.id
-            ? {
-                ...gathering,
-                attendanceCount: Math.max(
-                  0,
-                  gathering.attendanceCount + (isPresent ? 1 : -1),
-                ),
-              }
-            : gathering,
-        ),
-      )
-      setAttendanceTarget((current) =>
-        current
-          ? {
-              ...current,
-              attendanceCount: Math.max(
-                0,
-                current.attendanceCount + (isPresent ? 1 : -1),
-              ),
-            }
-          : current,
-      )
+      applyPresence(person, isPresent)
     } catch (error) {
-      setAttendanceError(errorMessage(error))
+      // Someone else already saved the requested state: show it instead of an error.
+      const isAlreadySaved =
+        error instanceof ApiError &&
+        error.code === (isPresent ? 'ATTENDANCE_ALREADY_RECORDED' : 'ATTENDANCE_NOT_FOUND')
+      if (isAlreadySaved) {
+        applyPresence(person, isPresent)
+        setAttendanceNotice(
+          `${personName(person)} was already marked ${isPresent ? 'present' : 'not present'}. The list now shows the saved attendance.`,
+        )
+      } else {
+        setAttendanceError(errorMessage(error))
+      }
     } finally {
       setChangingPersonKey(null)
     }
@@ -503,6 +520,9 @@ export function GatheringsPage() {
       >
         {attendanceError && (
           <FeedbackBanner className="mb-5" tone="error">{attendanceError}</FeedbackBanner>
+        )}
+        {attendanceNotice && (
+          <FeedbackBanner className="mb-5" tone="info">{attendanceNotice}</FeedbackBanner>
         )}
         {isAttendanceLoading ? (
           <LoadingState title="Loading attendance" description="Preparing the current Life Group roster and preserved historical records." />

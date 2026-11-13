@@ -34,6 +34,7 @@ import {
 import { formatTimestampDateTime } from '../lib/dates'
 import { getAccessToken } from '../lib/session'
 import { DIRECTORY_FIRST_PAGE, usePagedList } from '../lib/usePagedList'
+import { usePageTitle } from '../lib/usePageTitle'
 
 function getErrorMessage(error: unknown) {
   return error instanceof ApiError
@@ -96,6 +97,7 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 }
 
 export function FollowUpsPage() {
+  usePageTitle('Follow Up')
   const [status, setStatus] = useState<FollowUpStatus>('active')
   const followUpList = usePagedList<FollowUp>(getErrorMessage)
   const { items: followUps, loadMore, replace: replaceFollowUps } = followUpList

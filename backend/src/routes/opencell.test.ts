@@ -54,3 +54,54 @@ describe("OpenCell enrollment date defaults", () => {
     );
   });
 });
+
+describe("OpenCell calendar date validation", () => {
+  const sessionId = "44444444-4444-4444-8444-444444444444";
+  const visitorId = "33333333-3333-4333-8333-333333333333";
+
+  it.each(["2026-02-30", "2026-13-01", "not-a-date", "2026-9-1"])(
+    "rejects invalid date %s on Session create, Session update, and enrollment",
+    async (invalidDate) => {
+      const s = service();
+      const app = createApp({ authService: auth, openCellService: s });
+
+      const created = await request(app)
+        .post(`/api/opencell/programmes/${id}/sessions`)
+        .set("Authorization", "Bearer token")
+        .send({ sessionDate: invalidDate, title: null, location: null, notes: null });
+      const updated = await request(app)
+        .patch(`/api/opencell/programmes/${id}/sessions/${sessionId}`)
+        .set("Authorization", "Bearer token")
+        .send({ sessionDate: invalidDate });
+      const enrolled = await request(app)
+        .post(`/api/opencell/programmes/${id}/participants`)
+        .set("Authorization", "Bearer token")
+        .send({ visitorId, enrolledOn: invalidDate });
+
+      for (const response of [created, updated, enrolled]) {
+        expect(response.status).toBe(400);
+        expect(response.body.error.code).toBe("INVALID_REQUEST");
+      }
+      expect(s.createSession).not.toHaveBeenCalled();
+      expect(s.updateSession).not.toHaveBeenCalled();
+      expect(s.enroll).not.toHaveBeenCalled();
+    },
+  );
+
+  it("passes a real calendar date through to Session create", async () => {
+    const s = service();
+    const app = createApp({ authService: auth, openCellService: s });
+
+    const response = await request(app)
+      .post(`/api/opencell/programmes/${id}/sessions`)
+      .set("Authorization", "Bearer token")
+      .send({ sessionDate: "2028-02-29", title: null, location: null, notes: null });
+
+    expect(response.status).toBe(201);
+    expect(s.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "leader" }),
+      id,
+      { sessionDate: "2028-02-29", title: null, location: null, notes: null },
+    );
+  });
+});

@@ -14,6 +14,7 @@ import { StatusBadge } from '../components/ui/StatusBadge'
 import { ApiError, createAndRegisterHarvestVisitor, getEventImage, getHarvestEvent, getHarvestParticipations, getVisitors, recordHarvestInterest, registerHarvestVisitor, removeEventImage, uploadEventImage, type HarvestEvent, type HarvestParticipation, type Visitor } from '../lib/api'
 import { formatCalendarDateLong } from '../lib/dates'
 import { getAccessToken as token } from '../lib/session'
+import { usePageTitle } from '../lib/usePageTitle'
 
 function message(error: unknown) { return error instanceof ApiError ? error.message : 'Harvest data is unavailable right now.' }
 const formatDate = formatCalendarDateLong
@@ -23,6 +24,7 @@ function interestLabel(value: boolean | null) { return value === true ? 'Interes
 export function HarvestEventPage() {
   const { eventId } = useParams(); const { actor } = useAuth(); const isAdmin = actor?.role === 'admin'
   const [event, setEvent] = useState<HarvestEvent | null>(null); const [participations, setParticipations] = useState<HarvestParticipation[]>([])
+  usePageTitle(event ? `${event.title} · Harvest` : 'Harvest')
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState<string | null>(null)
   const [search, setSearch] = useState(''); const [registerOpen, setRegisterOpen] = useState(false); const [interest, setInterest] = useState<HarvestParticipation | null>(null)
 

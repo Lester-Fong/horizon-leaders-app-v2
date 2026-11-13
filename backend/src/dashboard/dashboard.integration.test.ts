@@ -249,4 +249,49 @@ suite("Dashboard OpenCell aggregation with local Supabase", () => {
       rate: 75,
     });
   });
+
+  it("gives a Leader without a Life Group the normal dashboard with empty group data", async () => {
+    const leaderUser = await db.auth.admin.createUser({
+      email: `dashboard-unassigned-${Date.now()}@example.test`,
+      email_confirm: true,
+      password: "Dashboard-Aa1!",
+    });
+    if (leaderUser.error || !leaderUser.data.user) throw leaderUser.error ?? new Error("Leader missing");
+    users.push(leaderUser.data.user.id);
+    const service = createSupabaseDashboardService({ serviceRoleKey: key!, supabaseUrl: url! });
+    const actor: HorizonActor = { id: leaderUser.data.user.id, isActive: true, name: "Unassigned Leader", role: "leader" };
+
+    const data = await service.get(actor, { period: "8" });
+
+    expect(data.isUnassignedLeader).toBe(true);
+    expect(data.metrics.myLifeGroupMembers).toBe(0);
+    expect(data.metrics.myLifeGroupVisitors).toBe(0);
+    expect(data.sundayAttendance.points).toEqual([]);
+    expect(data.recentUpcoming.recent.some((item) => item.kind === "gathering")).toBe(false);
+  });
+
+  it("dates a finished OpenCell Programme in recent activity by the Manila calendar day", async () => {
+    const createdUser = await db.auth.admin.createUser({
+      email: `dashboard-recent-${Date.now()}@example.test`,
+      email_confirm: true,
+      password: "Dashboard-Aa1!",
+    });
+    if (createdUser.error || !createdUser.data.user) throw createdUser.error ?? new Error("User missing");
+    users.push(createdUser.data.user.id);
+    const actor: HorizonActor = { id: createdUser.data.user.id, isActive: true, name: "Dashboard Recent Admin", role: "admin" };
+    // Far-future finish keeps this Programme first in recent activity regardless of local data.
+    const programme = await db.from("opencell_programmes").insert({
+      created_by_profile_id: actor.id,
+      description: null,
+      finished_at: "2099-11-12T20:30:00Z",
+      name: "Dashboard late finish",
+      status: "finished",
+    }).select("id").single();
+    if (programme.error) throw programme.error;
+    programmeIds.push(programme.data.id);
+
+    const data = await createSupabaseDashboardService({ serviceRoleKey: key!, supabaseUrl: url! }).get(actor, { period: "8" });
+
+    expect(data.recentUpcoming.recent.find((item) => item.id === programme.data.id)?.date).toBe("2099-11-13");
+  });
 });

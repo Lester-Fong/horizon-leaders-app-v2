@@ -22,6 +22,7 @@ const actors: Record<"admin" | "leader", HorizonActor> = {
 const user: ManagedUser = {
   assignedLifeGroup: null,
   createdAt: "2026-11-01T00:00:00.000Z",
+  deletedAt: null,
   email: "new.leader@example.test",
   id: userId,
   isActive: true,
@@ -143,6 +144,14 @@ describe("Users API reads", () => {
     expect(userService.list).toHaveBeenCalledWith({ search: "lina", status: "all" });
   });
 
+  it("accepts the deleted status", async () => {
+    const { app, userService } = createTestApp();
+    const response = await request(app).get("/api/users?status=deleted").set(asAdmin);
+
+    expect(response.status).toBe(200);
+    expect(userService.list).toHaveBeenCalledWith({ search: undefined, status: "deleted" });
+  });
+
   it("rejects an unknown status and an invalid id", async () => {
     const { app, userService } = createTestApp();
     const statusResponse = await request(app).get("/api/users?status=archived").set(asAdmin);
@@ -188,6 +197,27 @@ describe("Users API mutations", () => {
 
     expect(response.status).toBe(status);
     expect(userService.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects the reserved deleted-user email domain on create and update", async () => {
+    const { app, userService } = createTestApp();
+    const created = await request(app).post("/api/users").set(asAdmin).send({
+      email: "Someone@Deleted.Invalid",
+      name: "A",
+      password: strongPassword,
+      role: "leader",
+    });
+    const updated = await request(app)
+      .patch(`/api/users/${userId}`)
+      .set(asAdmin)
+      .send({ email: `deleted+${userId}@deleted.invalid` });
+
+    for (const response of [created, updated]) {
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("EMAIL_NOT_ALLOWED");
+    }
+    expect(userService.create).not.toHaveBeenCalled();
+    expect(userService.update).not.toHaveBeenCalled();
   });
 
   it("updates only provided fields and rejects empty or unknown updates", async () => {
@@ -248,12 +278,19 @@ describe("Users API mutations", () => {
   it("maps service errors to their HTTP status and code", async () => {
     const userService = createUserService();
     vi.mocked(userService.delete).mockRejectedValueOnce(
-      new UserServiceError(409, "USER_HAS_HISTORY", "Deactivate instead."),
+      new UserServiceError(409, "USER_DELETED", "This user was deleted and can no longer be changed."),
+    );
+    vi.mocked(userService.setActive).mockRejectedValueOnce(
+      new UserServiceError(409, "LAST_ACTIVE_ADMIN", "At least one active Admin is required."),
     );
     vi.mocked(userService.create).mockRejectedValueOnce(new Error("raw failure"));
     const { app } = createTestApp(userService);
 
     const conflict = await request(app).delete(`/api/users/${userId}`).set(asAdmin);
+    const lastAdmin = await request(app)
+      .patch(`/api/users/${userId}/status`)
+      .set(asAdmin)
+      .send({ isActive: false });
     const failure = await request(app).post("/api/users").set(asAdmin).send({
       email: "a@example.test",
       name: "A",
@@ -262,7 +299,12 @@ describe("Users API mutations", () => {
     });
 
     expect(conflict.status).toBe(409);
-    expect(conflict.body.error.code).toBe("USER_HAS_HISTORY");
+    expect(conflict.body.error.code).toBe("USER_DELETED");
+    expect(lastAdmin.status).toBe(409);
+    expect(lastAdmin.body.error).toEqual({
+      code: "LAST_ACTIVE_ADMIN",
+      message: "At least one active Admin is required.",
+    });
     expect(failure.status).toBe(500);
     expect(failure.body.error.code).toBe("USER_SERVICE_UNAVAILABLE");
     expect(JSON.stringify(failure.body)).not.toContain("raw failure");

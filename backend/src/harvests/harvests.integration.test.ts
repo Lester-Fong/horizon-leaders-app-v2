@@ -107,4 +107,28 @@ describeLocal("Harvest API with local Supabase", () => {
     expect((await api("admin", "post", `/api/events/harvest/${second.data.id}/close`)).status).toBe(200);
     const afterCloseInterest = await api("leaderB", "patch", `/api/events/harvest/${second.data.id}/participations/${lateDecisionVisitor}/interest`).send({ interested: true }); expect(afterCloseInterest.status).toBe(200); expect(afterCloseInterest.body.data.followUpResult).toBe("created");
   });
+
+  it("treats a re-sent stored date as unchanged once participation or closing locks the date", async () => {
+    const adminId = await profile("Harvest Edit Admin", "admin");
+    const actors: Record<string, HorizonActor> = { admin: { id: adminId, isActive: true, name: "Harvest Edit Admin", role: "admin" } };
+    const authService: AuthService = { authenticate: async (token) => ({ actor: actors[token]!, ok: true }) };
+    const memberService = createSupabaseMemberService({ serviceRoleKey: localKey, supabaseUrl: localUrl });
+    const app = createApp({ authService, harvestService: createSupabaseHarvestService({ memberService, serviceRoleKey: localKey, supabaseUrl: localUrl }), memberService });
+    const api = (method: "patch" | "post", path: string) => request(app)[method](path).set("Authorization", "Bearer admin");
+    const eventDate = "2026-10-10";
+
+    const created = await api("post", "/api/events/harvest").send({ description: null, eventDate, location: null, title: "Date Lock Harvest" });
+    expect(created.status).toBe(201); const eventId = created.body.data.id as string; eventIds.push(eventId);
+    expect((await api("post", `/api/events/harvest/${eventId}/participations`).send({ visitorId: await visitor("Locked") })).status).toBe(201);
+
+    const renamed = await api("patch", `/api/events/harvest/${eventId}`).send({ description: null, eventDate, location: "Plaza", title: "Renamed Harvest" });
+    expect(renamed.status).toBe(200); expect(renamed.body.data).toMatchObject({ eventDate, location: "Plaza", title: "Renamed Harvest" });
+    expect((await api("patch", `/api/events/harvest/${eventId}`).send({ eventDate: "2026-10-11" })).status).toBe(422);
+
+    expect((await api("post", `/api/events/harvest/${eventId}/close`)).status).toBe(200);
+    const closedRename = await api("patch", `/api/events/harvest/${eventId}`).send({ description: null, eventDate, location: "Plaza", title: "Closed Harvest" });
+    expect(closedRename.status).toBe(200); expect(closedRename.body.data).toMatchObject({ eventDate, status: "closed", title: "Closed Harvest" });
+    const onlyDate = await api("patch", `/api/events/harvest/${eventId}`).send({ eventDate });
+    expect(onlyDate.status).toBe(200); expect(onlyDate.body.data.title).toBe("Closed Harvest");
+  });
 });

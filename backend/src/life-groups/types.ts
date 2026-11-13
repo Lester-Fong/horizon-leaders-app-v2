@@ -3,6 +3,8 @@ import type { HorizonActor } from "../auth/types.js";
 export interface LifeGroupLeader {
   id: string;
   isActive: boolean;
+  /** True when an Admin deleted this user (sign-in removed, history kept). */
+  isDeleted: boolean;
   name: string;
 }
 

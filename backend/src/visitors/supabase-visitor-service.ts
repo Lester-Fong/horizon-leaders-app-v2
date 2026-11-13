@@ -27,6 +27,7 @@ import {
 } from "./types.js";
 
 interface SupabaseVisitorServiceConfig {
+  fetchImpl?: typeof globalThis.fetch;
   generateQrToken?: () => string;
   memberService: MemberService;
   serviceRoleKey: string;
@@ -42,6 +43,8 @@ type MemberConflictRow = Pick<
 const VISITOR_COLUMNS =
   "id, first_name, last_name, phone, email, normalized_phone, normalized_email, life_group_id, status, converted_member_id, converted_at, created_at, updated_at";
 const LIFE_GROUP_COLUMNS = "id, name, is_active, leader_profile_id";
+/** PostgREST code for a `.single()` request that matched no row. */
+const POSTGREST_NO_ROW = "PGRST116";
 
 function serviceUnavailable() {
   return new VisitorServiceError(
@@ -76,6 +79,18 @@ function mapVisitorWriteError(error: { code?: string; message?: string }) {
   return serviceUnavailable();
 }
 
+/** Leaders cannot see converted Visitors, so they get a not-found instead. */
+function visitorNotEditableError(actor: HorizonActor) {
+  if (actor.role === "leader") {
+    return new VisitorServiceError(404, "VISITOR_NOT_FOUND", "Visitor was not found.");
+  }
+  return new VisitorServiceError(
+    409,
+    "VISITOR_NOT_ACTIVE",
+    "Converted Visitors cannot be edited.",
+  );
+}
+
 function mapVisitor(
   visitor: VisitorRow,
   lifeGroup?: { id: string; is_active: boolean; name: string },
@@ -98,6 +113,7 @@ function mapVisitor(
 }
 
 export function createSupabaseVisitorService({
+  fetchImpl,
   generateQrToken = generateMemberQrToken,
   memberService,
   serviceRoleKey,
@@ -109,6 +125,7 @@ export function createSupabaseVisitorService({
       detectSessionInUrl: false,
       persistSession: false,
     },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
   async function getVisitorRow(visitorId: string) {
@@ -383,20 +400,7 @@ export function createSupabaseVisitorService({
 
     async update(actor, visitorId, input) {
       const visitor = await getVisitorRow(visitorId);
-      if (visitor.status !== "active") {
-        if (actor.role === "leader") {
-          throw new VisitorServiceError(
-            404,
-            "VISITOR_NOT_FOUND",
-            "Visitor was not found.",
-          );
-        }
-        throw new VisitorServiceError(
-          409,
-          "VISITOR_NOT_ACTIVE",
-          "Converted Visitors cannot be edited.",
-        );
-      }
+      if (visitor.status !== "active") throw visitorNotEditableError(actor);
       const update: TablesUpdate<"visitors"> = {};
       if (input.firstName !== undefined) update.first_name = input.firstName;
       if (input.lastName !== undefined) update.last_name = input.lastName;
@@ -409,6 +413,12 @@ export function createSupabaseVisitorService({
         .eq("status", "active")
         .select(VISITOR_COLUMNS)
         .single();
+      if (error?.code === POSTGREST_NO_ROW) {
+        // The Visitor was converted (or deleted) after the status check above.
+        const currentVisitor = await getVisitorRow(visitorId);
+        if (currentVisitor.status !== "active") throw visitorNotEditableError(actor);
+        throw serviceUnavailable();
+      }
       if (error) throw mapVisitorWriteError(error);
       return hydrateVisitor(data);
     },
